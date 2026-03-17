@@ -60,6 +60,21 @@ controlPlane:
 
 See [values.yaml](charts/clustermind-edge/values.yaml) for all configuration options.
 
+### Verifying Image Signatures
+
+All ClusterMind images are signed with [cosign](https://github.com/sigstore/cosign). Verify before deploying:
+
+```bash
+cosign verify --key https://raw.githubusercontent.com/Smirnov-Labs/helm-charts/main/cosign.pub \
+  ghcr.io/smirnov-labs/clustermind-edge:<tag>
+```
+
+Or using the local key from this repo:
+
+```bash
+cosign verify --key cosign.pub ghcr.io/smirnov-labs/clustermind-edge:<tag>
+```
+
 ## License
 
 Copyright Smirnov Labs. All rights reserved.
