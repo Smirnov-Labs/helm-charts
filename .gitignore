@@ -1,2 +1,6 @@
 *.tgz
 charts/*/charts/
+
+# Customer-specific value files — only the example template is committed
+examples/*
+!examples/example-customer.yaml
