@@ -1,0 +1,53 @@
+# ClusterMind Edge — Example Customer Values
+# Copy this file and fill in your real credentials.
+# NEVER commit real API keys or customer-specific hostnames to this repo.
+#
+# Install:
+#   helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
+#     --version 0.2.0 -f my-values.yaml -n clustermind-edge --create-namespace
+
+global:
+  imageRegistry: "ghcr.io/smirnov-labs"
+
+image:
+  tag: "0115a4a"
+  pullPolicy: IfNotPresent
+
+controlPlane:
+  url: "https://api.example.com"
+  clusterApiKey: "REPLACE_WITH_YOUR_CLUSTER_API_KEY"
+
+# Slack — fill in after creating your Slack app
+slack:
+  botToken: "xoxb-placeholder"
+  signingSecret: "placeholder"
+  teamId: "T00000000"
+  alertChannel: "C00000000"
+
+# Anthropic — placeholder, will be delivered from control-plane via WebSocket
+anthropic:
+  apiKey: "sk-ant-placeholder"
+
+ingress:
+  enabled: true
+  type: ingress
+  className: nginx
+  host: "clustermind.example.com"
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
+
+metrics:
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+
+redis:
+  persistence:
+    size: 1Gi
+    storageClass: gp3
+
+config:
+  logLevel: INFO
+  diagnosticIntervalHours: 6
