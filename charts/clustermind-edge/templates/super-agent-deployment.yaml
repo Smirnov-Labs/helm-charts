@@ -52,11 +52,14 @@ spec:
               value: "privileged"
             - name: REDIS_URL
               value: "redis://{{ include "clustermind-edge.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:6379/0"
+            {{- if or .Values.anthropic.apiKey .Values.anthropic.existingSecret }}
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "clustermind-edge.anthropicSecretName" . }}
                   key: {{ .Values.anthropic.existingSecretKey | default "ANTHROPIC_API_KEY" }}
+            {{- end }}
+            {{- if or .Values.slack.botToken .Values.slack.existingSecret }}
             - name: SLACK_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -77,6 +80,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "clustermind-edge.slackSecretName" . }}
                   key: SLACK_ALERT_CHANNEL
+            {{- end }}
             {{- if or .Values.controlPlane.clusterApiKey .Values.controlPlane.existingSecret }}
             - name: CLUSTER_API_KEY
               valueFrom:
