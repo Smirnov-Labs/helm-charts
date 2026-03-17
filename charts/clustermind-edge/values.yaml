@@ -68,10 +68,17 @@ metrics:
 
 ingress:
   enabled: false
-  className: traefik
+  # "ingress" for standard K8s Ingress (nginx, alb, etc.)
+  # "traefik-ingressroute" for Traefik IngressRoute CRD
+  type: ingress
+  className: nginx
   host: ""
+  annotations: {}
   tls:
     enabled: true
+    # For type: ingress — cert-manager ClusterIssuer name
+    clusterIssuer: letsencrypt-prod
+    # For type: traefik-ingressroute — Traefik cert resolver
     certResolver: letsencrypt
 
 namespace:

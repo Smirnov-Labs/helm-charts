@@ -1,4 +1,5 @@
 {{- if .Values.ingress.enabled }}
+{{- if eq .Values.ingress.type "traefik-ingressroute" }}
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -19,7 +20,7 @@ spec:
         - name: {{ include "clustermind-edge.fullname" . }}-slack-headers
   {{- if .Values.ingress.tls.enabled }}
   tls:
-    certResolver: {{ .Values.ingress.tls.certResolver }}
+    certResolver: {{ .Values.ingress.tls.certResolver | default "letsencrypt" }}
   {{- end }}
 ---
 apiVersion: traefik.io/v1alpha1
@@ -33,4 +34,39 @@ spec:
   headers:
     customRequestHeaders:
       X-Forwarded-Proto: "https"
+{{- else }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clustermind-edge.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.tls.enabled }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | default "letsencrypt-prod" }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host }}
+      secretName: {{ include "clustermind-edge.fullname" . }}-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /slack
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "clustermind-edge.fullname" . }}
+                port:
+                  number: 8080
+{{- end }}
 {{- end }}
