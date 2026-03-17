@@ -1,0 +1,22 @@
+{{- if .Values.superAgent.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}-super-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clustermind-edge.superAgentLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "clustermind-edge.superAgentSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

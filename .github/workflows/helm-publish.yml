@@ -1,0 +1,72 @@
+name: Helm Chart Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      chart:
+        description: 'Chart to publish (e.g., clustermind-edge)'
+        required: true
+        default: 'clustermind-edge'
+
+env:
+  REGISTRY: ghcr.io/smirnov-labs/charts
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Determine chart to publish
+        id: chart
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ github.event.inputs.chart }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=clustermind-edge" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Lint chart
+        run: |
+          CHART="charts/${{ steps.chart.outputs.name }}"
+          echo "Linting $CHART..."
+          helm lint "$CHART"
+
+      - name: Package chart
+        id: package
+        run: |
+          CHART="charts/${{ steps.chart.outputs.name }}"
+
+          # If triggered by tag, update chart version to match
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "Setting chart version to $VERSION"
+            sed -i "s/^version:.*/version: $VERSION/" "$CHART/Chart.yaml"
+            sed -i "s/^appVersion:.*/appVersion: \"$VERSION\"/" "$CHART/Chart.yaml"
+          fi
+
+          helm package "$CHART"
+          PKG=$(ls *.tgz)
+          echo "package=$PKG" >> $GITHUB_OUTPUT
+          echo "Packaged: $PKG"
+
+      - name: Push chart to GHCR
+        run: |
+          echo "Publishing ${{ steps.package.outputs.package }} to oci://$REGISTRY..."
+          helm push "${{ steps.package.outputs.package }}" "oci://$REGISTRY"
+          echo "Published to oci://$REGISTRY/${{ steps.chart.outputs.name }}"

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clustermind-edge.labels" . | nindent 4 }}
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  DIAGNOSTIC_INTERVAL_HOURS: {{ .Values.config.diagnosticIntervalHours | quote }}
+  DASHBOARD_URL: {{ .Values.config.dashboardUrl | quote }}
+  CONTROL_PLANE_URL: {{ .Values.controlPlane.url | quote }}
+  {{- if .Values.config.otelEndpoint }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
+  {{- end }}

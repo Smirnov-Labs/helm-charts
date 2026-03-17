@@ -1,0 +1,84 @@
+global:
+  imageRegistry: "ghcr.io/smirnov-labs"
+  imagePullSecrets: []
+
+image:
+  repository: clustermind-edge
+  tag: ""  # defaults to appVersion
+  pullPolicy: IfNotPresent
+
+anthropic:
+  apiKey: ""
+  existingSecret: ""
+  existingSecretKey: "ANTHROPIC_API_KEY"
+
+slack:
+  botToken: ""
+  signingSecret: ""
+  teamId: ""
+  alertChannel: ""
+  existingSecret: ""
+
+controlPlane:
+  url: "https://api.clustermind.ai"
+  clusterApiKey: ""
+  existingSecret: ""
+
+agent:
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  resources: {}
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+
+superAgent:
+  enabled: false
+  resources: {}
+
+serviceAccount:
+  create: true
+  annotations: {}
+
+diagnostics:
+  localFallback:
+    enabled: false
+    checksYaml: ""
+
+rbac:
+  create: true
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    namespace: monitoring
+  prometheusRule:
+    enabled: false
+    namespace: monitoring
+
+ingress:
+  enabled: false
+  className: traefik
+  host: ""
+  tls:
+    enabled: true
+    certResolver: letsencrypt
+
+namespace:
+  create: true
+
+config:
+  logLevel: INFO
+  diagnosticIntervalHours: 6
+  dashboardUrl: "https://app.clustermind.ai"
+  otelEndpoint: ""

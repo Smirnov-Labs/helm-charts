@@ -1,0 +1,12 @@
+{{- if .Values.diagnostics.localFallback.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}-diagnostics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clustermind-edge.labels" . | nindent 4 }}
+data:
+  checks.yaml: |
+    {{- .Values.diagnostics.localFallback.checksYaml | nindent 4 }}
+{{- end }}

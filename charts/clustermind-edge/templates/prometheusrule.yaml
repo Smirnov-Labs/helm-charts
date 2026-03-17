@@ -1,0 +1,62 @@
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}
+  namespace: {{ .Values.metrics.prometheusRule.namespace | default "monitoring" }}
+  labels:
+    {{- include "clustermind-edge.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: clustermind-edge.rules
+      rules:
+        - alert: ClaudeDiagnosticRunsFailing
+          expr: |
+            increase(clustermindai_diagnostic_runs_total{status="error", namespace="{{ .Release.Namespace }}"}[1h]) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClusterMind diagnostic runs are failing"
+            description: "More than 2 diagnostic run failures in the last hour in namespace {{ .Release.Namespace }}."
+
+        - alert: ClaudeAgentErrors
+          expr: |
+            rate(clustermindai_agent_errors_total{namespace="{{ .Release.Namespace }}"}[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClusterMind agent is experiencing errors"
+            description: "Agent error rate exceeds 0.1/s in namespace {{ .Release.Namespace }}."
+
+        - alert: ClaudeHighAPICost
+          expr: |
+            increase(clustermindai_api_cost_dollars_total{namespace="{{ .Release.Namespace }}"}[24h]) > 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClusterMind API cost is high"
+            description: "API costs exceeded $10 in the last 24 hours in namespace {{ .Release.Namespace }}."
+
+        - alert: ClaudeRedisDown
+          expr: |
+            increase(clustermindai_redis_operations_total{status="error"}[5m]) > 10
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ClusterMind Redis sidecar is down"
+            description: "Redis error rate exceeded 10 operations in 5 minutes in namespace {{ .Release.Namespace }}."
+
+        - alert: ClaudeSlackWebhookLatency
+          expr: |
+            histogram_quantile(0.95, rate(clustermindai_slack_webhook_duration_seconds_bucket{namespace="{{ .Release.Namespace }}"}[5m])) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClusterMind Slack webhook latency is high"
+            description: "P95 Slack webhook latency exceeds 3s in namespace {{ .Release.Namespace }}."
+{{- end }}

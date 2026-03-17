@@ -1,0 +1,36 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clustermind-edge.labels" . | nindent 4 }}
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`{{ .Values.ingress.host }}`) && PathPrefix(`/slack`)
+      kind: Rule
+      services:
+        - name: {{ include "clustermind-edge.fullname" . }}
+          port: 8080
+      middlewares:
+        - name: {{ include "clustermind-edge.fullname" . }}-slack-headers
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    certResolver: {{ .Values.ingress.tls.certResolver }}
+  {{- end }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}-slack-headers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clustermind-edge.labels" . | nindent 4 }}
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: "https"
+{{- end }}

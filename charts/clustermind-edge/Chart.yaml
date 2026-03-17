@@ -1,0 +1,13 @@
+apiVersion: v2
+name: clustermind-edge
+description: ClusterMind Edge - Kubernetes diagnostic agent with AI-powered cluster analysis
+type: application
+version: 0.1.0
+appVersion: "0.0.0-dev"
+keywords:
+  - kubernetes
+  - diagnostics
+  - ai
+  - monitoring
+maintainers:
+  - name: Smirnov Labs

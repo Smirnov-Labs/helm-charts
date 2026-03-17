@@ -1,0 +1,22 @@
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}
+  namespace: {{ .Values.metrics.serviceMonitor.namespace | default "monitoring" }}
+  labels:
+    {{- include "clustermind-edge.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "clustermind-edge.selectorLabels" . | nindent 6 }}
+      component: service
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval | default "30s" }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout | default "10s" }}
+{{- end }}

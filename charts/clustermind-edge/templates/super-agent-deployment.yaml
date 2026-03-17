@@ -1,0 +1,121 @@
+{{- if .Values.superAgent.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}-super-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clustermind-edge.superAgentLabels" . | nindent 4 }}
+  annotations:
+    {{- include "clustermind-edge.annotations" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "clustermind-edge.superAgentSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "clustermind-edge.superAgentLabels" . | nindent 8 }}
+      annotations:
+        {{- include "clustermind-edge.annotations" . | nindent 8 }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: {{ include "clustermind-edge.superAgentServiceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: super-agent
+          image: {{ include "clustermind-edge.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "clustermind-edge.fullname" . }}-config
+          env:
+            - name: MODE
+              value: "privileged"
+            - name: REDIS_URL
+              value: "redis://{{ include "clustermind-edge.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:6379/0"
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clustermind-edge.anthropicSecretName" . }}
+                  key: {{ .Values.anthropic.existingSecretKey | default "ANTHROPIC_API_KEY" }}
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clustermind-edge.slackSecretName" . }}
+                  key: SLACK_BOT_TOKEN
+            - name: SLACK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clustermind-edge.slackSecretName" . }}
+                  key: SLACK_SIGNING_SECRET
+            - name: SLACK_TEAM_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clustermind-edge.slackSecretName" . }}
+                  key: SLACK_TEAM_ID
+            - name: SLACK_ALERT_CHANNEL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clustermind-edge.slackSecretName" . }}
+                  key: SLACK_ALERT_CHANNEL
+            {{- if or .Values.controlPlane.clusterApiKey .Values.controlPlane.existingSecret }}
+            - name: CLUSTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clustermind-edge.controlPlaneSecretName" . }}
+                  key: CLUSTER_API_KEY
+                  optional: true
+            {{- end }}
+          {{- with .Values.superAgent.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: repo-storage
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: repo-storage
+          emptyDir:
+            sizeLimit: 2Gi
+{{- end }}
