@@ -42,6 +42,10 @@ redis:
 superAgent:
   enabled: false
   resources: {}
+  # Permission mode for the super-agent. MUST be "readwrite" — the agent
+  # has elevated RBAC; rendering the read-only system prompt produces the
+  # silent-success bug class (see super-agent-deployment.yaml comment).
+  diagnosticMode: "readwrite"
 
 serviceAccount:
   create: true
