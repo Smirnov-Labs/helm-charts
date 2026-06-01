@@ -50,6 +50,15 @@ spec:
           env:
             - name: MODE
               value: "privileged"
+            # DIAGNOSTIC_MODE=readwrite is critical for the super-agent: without
+            # it, Settings.diagnostic_mode defaults to readonly (config.py:119),
+            # which causes get_system_prompt() to render the read-only escalation
+            # block — telling the privileged agent to "expect RBAC error" even
+            # though it has full RBAC. The agent then ends its turn with text
+            # only and zero tool calls, producing the silent-success bug.
+            # Refs: claude-k8s spec 2026-04-19 RC1, Phase 0.1.
+            - name: DIAGNOSTIC_MODE
+              value: {{ .Values.superAgent.diagnosticMode | default "readwrite" | quote }}
             - name: REDIS_URL
               value: "redis://{{ include "clustermind-edge.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:6379/0"
             {{- if or .Values.anthropic.apiKey .Values.anthropic.existingSecret }}
