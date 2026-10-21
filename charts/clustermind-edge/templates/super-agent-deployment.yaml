@@ -22,8 +22,14 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
+        # Restart the pod when its config or the chart's Secret changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "clustermind-edge.superAgentServiceAccountName" . }}
+      # SIGTERM starts the super-agent's graceful shutdown. That takes about 1s when
+      # idle and up to about 25s when an approved change is in flight.
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -31,6 +37,10 @@ spec:
         fsGroup: 1000
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.superAgent.nodeSelector }}
+      nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
@@ -59,6 +69,9 @@ spec:
             # Refs: claude-k8s spec 2026-04-19 RC1, Phase 0.1.
             - name: DIAGNOSTIC_MODE
               value: {{ .Values.superAgent.diagnosticMode | default "readwrite" | quote }}
+            # The edge pod's Redis, through its Service. The agent there also
+            # publishes the Anthropic key it gets from the control plane, so the
+            # super-agent needs no key of its own, and no agent token.
             - name: REDIS_URL
               value: "redis://{{ include "clustermind-edge.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:6379/0"
             {{- if or .Values.anthropic.apiKey .Values.anthropic.existingSecret }}
@@ -89,19 +102,30 @@ spec:
                 secretKeyRef:
                   name: {{ include "clustermind-edge.slackSecretName" . }}
                   key: SLACK_ALERT_CHANNEL
-            {{- end }}
-            {{- if or .Values.controlPlane.clusterApiKey .Values.controlPlane.existingSecret }}
-            - name: CLUSTER_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "clustermind-edge.controlPlaneSecretName" . }}
-                  key: CLUSTER_API_KEY
-                  optional: true
+            {{- else }}
+            # Required at startup even when Slack goes through the control plane. The
+            # super-agent serves no Slack endpoint, so empty values are safe here.
+            - name: SLACK_BOT_TOKEN
+              value: ""
+            - name: SLACK_SIGNING_SECRET
+              value: ""
+            - name: SLACK_TEAM_ID
+              value: ""
             {{- end }}
           {{- with .Values.superAgent.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          # The HTTP server listens only once startup is done, and startup waits up to
+          # ~75s for the edge pod's Redis. The startup probe holds liveness off for up
+          # to 150s.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /health

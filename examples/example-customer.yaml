@@ -1,53 +1,31 @@
 # ClusterMind Edge — Example Customer Values
-# Copy this file and fill in your real credentials.
+# Copy this file and fill in your own values.
 # NEVER commit real API keys or customer-specific hostnames to this repo.
+#
+# First create the namespace and a Secret with the agent token from the dashboard:
+#   kubectl create namespace clustermind
+#   kubectl -n clustermind create secret generic clustermind-agent-token \
+#     --from-literal=CLUSTER_API_KEY=<agent token>
 #
 # Install:
 #   helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-#     --version 0.2.0 -f my-values.yaml -n clustermind-edge --create-namespace
-
-global:
-  imageRegistry: "ghcr.io/smirnov-labs"
-
-image:
-  tag: "0115a4a"
-  pullPolicy: IfNotPresent
+#     --version 0.3.0 -f my-values.yaml --namespace clustermind
 
 controlPlane:
-  url: "https://api.example.com"
-  clusterApiKey: "REPLACE_WITH_YOUR_CLUSTER_API_KEY"
+  existingSecret: clustermind-agent-token  # pragma: allowlist secret
 
-# Slack — fill in after creating your Slack app
-slack:
-  botToken: "xoxb-placeholder"
-  signingSecret: "placeholder"
-  teamId: "T00000000"
-  alertChannel: "C00000000"
+redis:
+  persistence:
+    # Empty uses the cluster's default StorageClass. New EKS clusters have none, so
+    # name one there, such as gp3.
+    storageClass: ""
 
-# Anthropic — placeholder, will be delivered from control-plane via WebSocket
-anthropic:
-  apiKey: "sk-ant-placeholder"
-
-ingress:
-  enabled: true
-  type: ingress
-  className: nginx
-  host: "clustermind.example.com"
-  tls:
-    enabled: true
-    clusterIssuer: letsencrypt-prod
+# Off by default. Turn it on to let the agent run changes approved in the dashboard.
+superAgent:
+  enabled: false
 
 metrics:
   serviceMonitor:
     enabled: false
   prometheusRule:
     enabled: false
-
-redis:
-  persistence:
-    size: 1Gi
-    storageClass: gp3
-
-config:
-  logLevel: INFO
-  diagnosticIntervalHours: 6

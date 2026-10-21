@@ -1,4 +1,5 @@
 {{- if .Values.rbac.create }}
+# Read access for the regular agent. It deliberately excludes Secrets.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -6,48 +7,60 @@ metadata:
   labels:
     {{- include "clustermind-edge.labels" . | nindent 4 }}
 rules:
-  # Core resources - read only
+  # Core resources
   - apiGroups: [""]
     resources:
       - pods
       - pods/log
+      - pods/status
       - services
+      - services/status
       - endpoints
-      - configmaps
-      - secrets
-      - namespaces
       - nodes
-      - persistentvolumes
-      - persistentvolumeclaims
+      - nodes/status
       - events
-      - replicationcontrollers
+      - configmaps
+      - persistentvolumeclaims
+      - persistentvolumeclaims/status
+      - persistentvolumes
+      - persistentvolumes/status
+      - namespaces
       - resourcequotas
       - limitranges
-      - serviceaccounts
+      - replicationcontrollers
+      - replicationcontrollers/status
     verbs: ["get", "list", "watch"]
   # Apps resources
   - apiGroups: ["apps"]
     resources:
       - deployments
-      - daemonsets
-      - statefulsets
+      - deployments/status
       - replicasets
+      - replicasets/status
+      - statefulsets
+      - statefulsets/status
+      - daemonsets
+      - daemonsets/status
     verbs: ["get", "list", "watch"]
   # Batch resources
   - apiGroups: ["batch"]
     resources:
       - jobs
+      - jobs/status
       - cronjobs
+      - cronjobs/status
     verbs: ["get", "list", "watch"]
   # Autoscaling
   - apiGroups: ["autoscaling"]
     resources:
       - horizontalpodautoscalers
+      - horizontalpodautoscalers/status
     verbs: ["get", "list", "watch"]
   # Networking
   - apiGroups: ["networking.k8s.io"]
     resources:
       - ingresses
+      - ingresses/status
       - networkpolicies
     verbs: ["get", "list", "watch"]
   # Storage
@@ -56,35 +69,38 @@ rules:
       - storageclasses
       - volumeattachments
     verbs: ["get", "list", "watch"]
-  # RBAC
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources:
-      - clusterroles
-      - clusterrolebindings
-      - roles
-      - rolebindings
-    verbs: ["get", "list", "watch"]
-  # Cert-manager
+  # Cert-manager (if installed)
   - apiGroups: ["cert-manager.io"]
     resources:
       - certificates
+      - certificates/status
       - certificaterequests
       - issuers
       - clusterissuers
     verbs: ["get", "list", "watch"]
-  # Metrics
+  # Metrics, for kubectl top
   - apiGroups: ["metrics.k8s.io"]
     resources:
       - nodes
       - pods
     verbs: ["get", "list"]
-  # Longhorn
+  # Argo CD (if installed), for application sync status
+  - apiGroups: ["argoproj.io"]
+    resources:
+      - applications
+      - applications/status
+      - applicationsets
+      - applicationsets/status
+    verbs: ["get", "list", "watch"]
+  # Longhorn (if installed)
   - apiGroups: ["longhorn.io"]
     resources:
       - volumes
-      - replicas
-      - engines
       - nodes
+      - instancemanagers
+      - engines
+      - replicas
+      - settings
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

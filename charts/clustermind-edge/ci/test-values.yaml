@@ -1,0 +1,4 @@
+# Values for helm lint and helm template in CI. The chart refuses to render without an
+# agent token, so this names a Secret that only has to exist on a real cluster.
+controlPlane:
+  existingSecret: clustermind-agent-token  # pragma: allowlist secret

@@ -4,14 +4,30 @@ global:
 
 image:
   repository: clustermind-edge
-  tag: ""  # defaults to appVersion
+  tag: ""  # defaults to the chart's appVersion, a released edge version
   pullPolicy: IfNotPresent
 
+# Connection to the ClusterMind control plane. Create the cluster in the dashboard
+# (Clusters) to get its agent token. One of clusterApiKey or existingSecret is
+# required while url is set.
+controlPlane:
+  url: "https://api.clustermind.ai"
+  # The agent token, stored in a Secret the chart creates. existingSecret keeps it out
+  # of Helm's release history instead.
+  clusterApiKey: ""
+  # A Secret in the release namespace that holds the agent token.
+  existingSecret: ""
+  existingSecretKey: "CLUSTER_API_KEY"  # pragma: allowlist secret
+
+# Optional. With the control plane, leave this empty and set the key in the dashboard
+# (Settings). The control plane sends it to the agent.
 anthropic:
   apiKey: ""
   existingSecret: ""
   existingSecretKey: "ANTHROPIC_API_KEY"
 
+# Only for direct Slack mode, with controlPlane.url empty. With the control plane,
+# Slack events reach the agent through it, so leave these empty.
 slack:
   botToken: ""
   signingSecret: ""
@@ -19,29 +35,52 @@ slack:
   alertChannel: ""
   existingSecret: ""
 
-controlPlane:
-  url: "https://api.clustermind.ai"
-  clusterApiKey: ""
-  existingSecret: ""
-
 agent:
-  resources: {}
-  nodeSelector: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # The edge image is built for linux/amd64 only.
+  nodeSelector:
+    kubernetes.io/arch: amd64
   tolerations: []
   affinity: {}
 
 redis:
   enabled: true
   image: redis:7-alpine
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  # Redis holds approval and investigation state. Without persistence that state is
+  # lost whenever the pod restarts. Turn it off on a cluster with no default
+  # StorageClass, or set storageClass.
   persistence:
     enabled: true
     size: 1Gi
     storageClass: ""
 
+# The privileged executor. It runs changes a person approved in the dashboard, with
+# broad write access to the cluster. While it is off, the agent can only read.
 superAgent:
   enabled: false
-  resources: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # The edge image is built for linux/amd64 only.
+  nodeSelector:
+    kubernetes.io/arch: amd64
   # Permission mode for the super-agent. MUST be "readwrite" — the agent
   # has elevated RBAC; rendering the read-only system prompt produces the
   # silent-success bug class (see super-agent-deployment.yaml comment).
@@ -51,6 +90,9 @@ serviceAccount:
   create: true
   annotations: {}
 
+# The image carries default checks at /app/diagnostics/checks.yaml. They cover a scan
+# that starts before the control plane sends its checks. Enable this only to replace
+# them with checksYaml.
 diagnostics:
   localFallback:
     enabled: false
@@ -70,6 +112,7 @@ metrics:
     enabled: false
     namespace: monitoring
 
+# Only for direct Slack mode, where Slack posts events to the agent itself.
 ingress:
   enabled: false
   # "ingress" for standard K8s Ingress (nginx, alb, etc.)
@@ -84,9 +127,6 @@ ingress:
     clusterIssuer: letsencrypt-prod
     # For type: traefik-ingressroute — Traefik cert resolver
     certResolver: letsencrypt
-
-namespace:
-  create: true
 
 config:
   logLevel: INFO
