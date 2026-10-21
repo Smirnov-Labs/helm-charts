@@ -21,9 +21,11 @@ You need:
 
    ```bash
    kubectl create namespace clustermind
-   kubectl -n clustermind create secret generic clustermind-agent-token \
+   kubectl -n clustermind create secret generic clustermind-agent-token --save-config \
      --from-literal=CLUSTER_API_KEY=<agent token>
    ```
+
+   `--save-config` lets you update the Secret later with `kubectl apply`.
 
 3. Install the chart:
 
@@ -64,12 +66,12 @@ On EKS, volumes also need the Amazon EBS CSI driver add-on.
 
 ### Rotate the agent token
 
-After you regenerate the token in the dashboard, replace the Secret and restart the agent:
+After you regenerate the token in the dashboard, update the Secret and restart the agent:
 
 ```bash
 kubectl -n clustermind create secret generic clustermind-agent-token \
   --from-literal=CLUSTER_API_KEY=<new agent token> \
-  --dry-run=client -o yaml | kubectl replace -f -
+  --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n clustermind rollout restart statefulset/clustermind-edge
 ```
 

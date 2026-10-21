@@ -4,7 +4,7 @@
 #
 # First create the namespace and a Secret with the agent token from the dashboard:
 #   kubectl create namespace clustermind
-#   kubectl -n clustermind create secret generic clustermind-agent-token \
+#   kubectl -n clustermind create secret generic clustermind-agent-token --save-config \
 #     --from-literal=CLUSTER_API_KEY=<agent token>
 #
 # Install:
