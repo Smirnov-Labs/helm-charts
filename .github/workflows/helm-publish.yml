@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'
+  # Lint and render only; nothing is published from a pull request.
+  pull_request:
   workflow_dispatch:
     inputs:
       chart:
@@ -29,6 +31,7 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Login to GHCR
+        if: github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
 
@@ -45,19 +48,41 @@ jobs:
         run: |
           CHART="charts/${{ steps.chart.outputs.name }}"
           echo "Linting $CHART..."
-          helm lint "$CHART"
+          helm lint --strict "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml"
+
+      # helm lint doesn't evaluate the chart's fail checks, so render it too: with the
+      # CI values, with every optional part on, and once each where it must refuse.
+      - name: Render chart
+        run: |
+          CHART="charts/${{ steps.chart.outputs.name }}"
+          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" > /dev/null
+          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
+            --set superAgent.enabled=true \
+            --set metrics.serviceMonitor.enabled=true \
+            --set metrics.prometheusRule.enabled=true \
+            --set redis.persistence.enabled=false \
+            --set diagnostics.localFallback.enabled=true > /dev/null
+          if helm template clustermind-edge "$CHART" -f "$CHART/ci/test-values.yaml" > /dev/null 2>&1; then
+            echo "::error::the chart rendered into the default namespace; it must refuse"
+            exit 1
+          fi
+          if helm template clustermind-edge "$CHART" --namespace clustermind > /dev/null 2>&1; then
+            echo "::error::the chart rendered without an agent token; it must refuse"
+            exit 1
+          fi
 
       - name: Package chart
+        if: github.event_name != 'pull_request'
         id: package
         run: |
           CHART="charts/${{ steps.chart.outputs.name }}"
 
-          # If triggered by tag, update chart version to match
+          # A tag sets the chart version only. appVersion stays as Chart.yaml has it: it
+          # is the edge image tag the chart deploys, which the chart version is not.
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
             echo "Setting chart version to $VERSION"
             sed -i "s/^version:.*/version: $VERSION/" "$CHART/Chart.yaml"
-            sed -i "s/^appVersion:.*/appVersion: \"$VERSION\"/" "$CHART/Chart.yaml"
           fi
 
           helm package "$CHART"
@@ -66,6 +91,7 @@ jobs:
           echo "Packaged: $PKG"
 
       - name: Push chart to GHCR
+        if: github.event_name != 'pull_request'
         run: |
           echo "Publishing ${{ steps.package.outputs.package }} to oci://$REGISTRY..."
           helm push "${{ steps.package.outputs.package }}" "oci://$REGISTRY"

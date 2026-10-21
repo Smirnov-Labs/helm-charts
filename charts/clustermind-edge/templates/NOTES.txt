@@ -1,0 +1,21 @@
+ClusterMind edge {{ .Values.image.tag | default .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+Check that the agent is running:
+
+  kubectl -n {{ .Release.Namespace }} get pods
+  kubectl -n {{ .Release.Namespace }} logs statefulset/{{ include "clustermind-edge.fullname" . }} -c agent
+{{- if .Values.controlPlane.url }}
+
+Within a minute or two the cluster shows as connected in the dashboard:
+{{ .Values.config.dashboardUrl }}/clusters
+{{- if not (or .Values.anthropic.apiKey .Values.anthropic.existingSecret) }}
+
+Scans use your workspace's Anthropic API key. Set it in the dashboard under Settings.
+{{- end }}
+{{- end }}
+{{- if not .Values.superAgent.enabled }}
+
+The agent can read the cluster but not change it. To let it run changes you approve
+in the dashboard, run helm upgrade with your install flags plus
+--set superAgent.enabled=true.
+{{- end }}

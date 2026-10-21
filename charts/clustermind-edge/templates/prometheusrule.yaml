@@ -1,4 +1,6 @@
 {{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled }}
+# Metric names must match METRIC_PREFIX ("clustermindai_") in the edge agent. An
+# expression over a series that doesn't exist never fires and still shows as healthy.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -8,37 +10,37 @@ metadata:
     {{- include "clustermind-edge.labels" . | nindent 4 }}
 spec:
   groups:
-    - name: clustermind-edge.rules
+    - name: clustermind-edge
       rules:
         - alert: ClaudeDiagnosticRunsFailing
           expr: |
-            increase(clustermindai_diagnostic_runs_total{status="error", namespace="{{ .Release.Namespace }}"}[1h]) > 2
+            increase(clustermindai_diagnostic_runs_total{status="failure"}[1h]) > 2
           for: 5m
           labels:
             severity: warning
           annotations:
             summary: "ClusterMind diagnostic runs are failing"
-            description: "More than 2 diagnostic run failures in the last hour in namespace {{ .Release.Namespace }}."
+            description: "More than 2 diagnostic runs have failed in the last hour."
 
         - alert: ClaudeAgentErrors
           expr: |
-            rate(clustermindai_agent_errors_total{namespace="{{ .Release.Namespace }}"}[5m]) > 0.1
+            increase(clustermindai_agent_errors_total[30m]) > 5
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "ClusterMind agent is experiencing errors"
-            description: "Agent error rate exceeds 0.1/s in namespace {{ .Release.Namespace }}."
+            summary: "ClusterMind agent errors increasing"
+            description: "The agent has hit {{`{{ $value }}`}} errors in the last 30 minutes."
 
         - alert: ClaudeHighAPICost
           expr: |
-            increase(clustermindai_api_cost_dollars_total{namespace="{{ .Release.Namespace }}"}[24h]) > 10
+            increase(clustermindai_agent_cost_usd_total[24h]) > 10
           for: 5m
           labels:
-            severity: warning
+            severity: info
           annotations:
-            summary: "ClusterMind API cost is high"
-            description: "API costs exceeded $10 in the last 24 hours in namespace {{ .Release.Namespace }}."
+            summary: "ClusterMind API costs are high"
+            description: "Anthropic API costs have exceeded $10 in the last 24 hours."
 
         - alert: ClaudeRedisDown
           expr: |
@@ -47,16 +49,67 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "ClusterMind Redis sidecar is down"
-            description: "Redis error rate exceeded 10 operations in 5 minutes in namespace {{ .Release.Namespace }}."
+            summary: "ClusterMind Redis connection issues"
+            description: "Redis operations are failing, so state may not be saved."
 
         - alert: ClaudeSlackWebhookLatency
           expr: |
-            histogram_quantile(0.95, rate(clustermindai_slack_webhook_duration_seconds_bucket{namespace="{{ .Release.Namespace }}"}[5m])) > 3
+            histogram_quantile(0.95, rate(clustermindai_slack_webhook_latency_seconds_bucket[5m])) > 2
           for: 5m
           labels:
             severity: warning
           annotations:
             summary: "ClusterMind Slack webhook latency is high"
-            description: "P95 Slack webhook latency exceeds 3s in namespace {{ .Release.Namespace }}."
+            description: "95th percentile webhook latency is {{`{{ $value }}`}}s."
+
+    # The agent's link to the control plane. The probes deliberately ignore it, so a
+    # lost link (for example a rotated agent token) shows up only here.
+    # clustermindai_control_plane_configured gates the rules: in direct Slack mode and
+    # on the super-agent the WebSocket and heartbeat gauges stay 0 by design.
+    - name: clustermind-edge-control-plane
+      rules:
+        - alert: ClusterMindEdgeControlPlaneStale
+          expr: |
+            (
+              (time() - clustermindai_control_plane_heartbeat_last_success_timestamp_seconds > 300)
+              or
+              (clustermindai_control_plane_ws_connected == 0)
+            )
+            and
+            (clustermindai_control_plane_configured == 1)
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClusterMind edge {{`{{ $labels.namespace }}/{{ $labels.pod }}`}} lost the control plane"
+            description: "No heartbeat accepted for 5+ minutes, or the WebSocket is down, so investigations and config no longer reach this cluster. clustermindai_control_plane_*_failures_total says why (unauthorized, http_5xx, http_other, network)."
+
+        - alert: ClusterMindEdgeControlPlaneStaleCritical
+          expr: |
+            (
+              (time() - clustermindai_control_plane_heartbeat_last_success_timestamp_seconds > 300)
+              or
+              (clustermindai_control_plane_ws_connected == 0)
+            )
+            and
+            (clustermindai_control_plane_configured == 1)
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ClusterMind edge {{`{{ $labels.namespace }}/{{ $labels.pod }}`}} has been cut off from the control plane for 30+ minutes"
+            description: "See ClusterMindEdgeControlPlaneStale. Restarting the agent does not fix a control-plane outage; check the failure reasons first."
+
+        - alert: ClusterMindEdgeControlPlaneAuthRejected
+          # 401/403 means the agent token is wrong, for example after it was
+          # regenerated in the dashboard. It never heals on its own.
+          expr: |
+            (increase(clustermindai_control_plane_ws_connect_failures_total{reason="unauthorized"}[10m]) > 0)
+            or
+            (increase(clustermindai_control_plane_heartbeat_failures_total{reason="unauthorized"}[10m]) > 0)
+          labels:
+            severity: critical
+          annotations:
+            summary: "The control plane rejects the agent token of ClusterMind edge {{`{{ $labels.namespace }}/{{ $labels.pod }}`}}"
+            description: "The control plane answered 401/403 in the last 10 minutes: the token in secret {{ include "clustermind-edge.controlPlaneSecretName" . }} is not the cluster's current agent token. Put the current token in the secret and restart the agent, or regenerate it in the dashboard first."
 {{- end }}

@@ -1,3 +1,4 @@
+{{- include "clustermind-edge.validate" . }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -24,8 +25,14 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
+        # Restart the pod when its config or the chart's Secret changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "clustermind-edge.serviceAccountName" . }}
+      # SIGTERM starts the agent's graceful shutdown. That takes about 1s when idle and
+      # up to about 50s when a Claude session or a dashboard investigation is in flight.
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -46,6 +53,73 @@ spec:
       {{- with .Values.agent.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.redis.enabled }}
+      # Redis is a native sidecar: an init container with restartPolicy: Always. The
+      # kubelet starts the agent only after Redis passes its startup probe, and on
+      # shutdown stops Redis only after the agent has exited.
+      initContainers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          restartPolicy: Always
+          # AOF (fsync every second) plus RDB snapshots. Redis holds approval
+          # completion and idempotency state, which RDB alone rolls back on an
+          # ungraceful restart.
+          command:
+            - redis-server
+            - --appendonly
+            - "yes"
+            - --appendfsync
+            - everysec
+            - --save
+            - "300 100"
+            - --save
+            - "60 1000"
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          {{- with .Values.redis.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # -e makes redis-cli exit non-zero on an error reply. A plain ping passes
+          # while Redis still answers "LOADING" as it reads its AOF.
+          startupProbe:
+            exec:
+              command:
+                - redis-cli
+                - -e
+                - ping
+            periodSeconds: 1
+            failureThreshold: 120
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
       {{- end }}
       containers:
         - name: agent
@@ -94,19 +168,41 @@ spec:
                 secretKeyRef:
                   name: {{ include "clustermind-edge.slackSecretName" . }}
                   key: SLACK_ALERT_CHANNEL
+            {{- else }}
+            # The agent refuses to start without these three, even when Slack events
+            # come through the control plane. Its own /slack/events endpoint accepts any
+            # request signed with SLACK_SIGNING_SECRET, so that value must stay secret:
+            # use the agent token, which only its Secret holds.
+            - name: SLACK_BOT_TOKEN
+              value: ""
+            - name: SLACK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clustermind-edge.controlPlaneSecretName" . }}
+                  key: {{ include "clustermind-edge.controlPlaneSecretKey" . }}
+            - name: SLACK_TEAM_ID
+              value: ""
             {{- end }}
             {{- if or .Values.controlPlane.clusterApiKey .Values.controlPlane.existingSecret }}
             - name: CLUSTER_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "clustermind-edge.controlPlaneSecretName" . }}
-                  key: CLUSTER_API_KEY
-                  optional: true
+                  key: {{ include "clustermind-edge.controlPlaneSecretKey" . }}
             {{- end }}
           {{- with .Values.agent.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          # The HTTP server listens only once startup is done, and startup waits up to
+          # ~75s for Redis. The startup probe holds liveness off for up to 150s.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /health
@@ -124,9 +220,12 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           volumeMounts:
+            {{- /* A mount at /app/diagnostics hides the image's fallback checks file. */}}
+            {{- if .Values.diagnostics.localFallback.enabled }}
             - name: diagnostics-config
               mountPath: /app/diagnostics
               readOnly: true
+            {{- end }}
             - name: repo-storage
               mountPath: /data
           securityContext:
@@ -135,61 +234,19 @@ spec:
             capabilities:
               drop:
                 - ALL
-        {{- if .Values.redis.enabled }}
-        - name: redis
-          image: {{ .Values.redis.image }}
-          command:
-            - redis-server
-            - --appendonly
-            - "no"
-            - --save
-            - "300 100"
-            - --save
-            - "60 1000"
-          ports:
-            - name: redis
-              containerPort: 6379
-              protocol: TCP
-          {{- with .Values.redis.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          livenessProbe:
-            exec:
-              command:
-                - redis-cli
-                - ping
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          readinessProbe:
-            exec:
-              command:
-                - redis-cli
-                - ping
-            initialDelaySeconds: 3
-            periodSeconds: 5
-            timeoutSeconds: 5
-            failureThreshold: 3
-          volumeMounts:
-            - name: redis-data
-              mountPath: /data
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
-            capabilities:
-              drop:
-                - ALL
-        {{- end }}
       volumes:
+        {{- if .Values.diagnostics.localFallback.enabled }}
         - name: diagnostics-config
           configMap:
             name: {{ include "clustermind-edge.fullname" . }}-diagnostics
-            optional: true
+        {{- end }}
         - name: repo-storage
           emptyDir:
             sizeLimit: 2Gi
+        {{- if and .Values.redis.enabled (not .Values.redis.persistence.enabled) }}
+        - name: redis-data
+          emptyDir: {}
+        {{- end }}
   {{- if and .Values.redis.enabled .Values.redis.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
