@@ -4,7 +4,7 @@ global:
 
 image:
   repository: clustermind-edge
-  tag: ""  # defaults to the chart's appVersion, a verified multi-platform edge build
+  tag: ""  # defaults to the chart's appVersion, a released multi-platform edge version
   pullPolicy: IfNotPresent
 
 # Connection to the ClusterMind control plane. Create the cluster in the dashboard
