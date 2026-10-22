@@ -52,6 +52,9 @@ jobs:
 
       # helm lint doesn't evaluate the chart's fail checks, so render it too: with the
       # CI values, with every optional part on, and once each where it must refuse.
+      - name: Install render assertion dependency
+        run: python3 -m pip install PyYAML==6.0.3
+
       - name: Render chart
         run: |
           CHART="charts/${{ steps.chart.outputs.name }}"
@@ -62,6 +65,18 @@ jobs:
             --set metrics.prometheusRule.enabled=true \
             --set redis.persistence.enabled=false \
             --set diagnostics.localFallback.enabled=true > /dev/null
+          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
+            -f "$CHART/ci/arm64-values.yaml" > /tmp/arm64-chart.yaml
+          python3 - <<'PYTHON'
+          import yaml
+          workloads = [doc for doc in yaml.safe_load_all(open('/tmp/arm64-chart.yaml'))
+                       if doc and doc.get('kind') in ('StatefulSet', 'Deployment')]
+          assert len(workloads) == 2, workloads
+          for workload in workloads:
+              selector = workload['spec']['template']['spec']['nodeSelector']
+              assert selector['kubernetes.io/arch'] == 'arm64', workload['metadata']['name']
+              assert selector['kubernetes.io/os'] == 'linux', workload['metadata']['name']
+          PYTHON
           if helm template clustermind-edge "$CHART" -f "$CHART/ci/test-values.yaml" > /dev/null 2>&1; then
             echo "::error::the chart rendered into the default namespace; it must refuse"
             exit 1

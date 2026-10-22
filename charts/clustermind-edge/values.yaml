@@ -43,7 +43,8 @@ agent:
     limits:
       cpu: "1"
       memory: 1Gi
-  # The edge image is built for linux/amd64 only.
+  # AMD64 remains the default for older image tags. For ARM64, use a verified
+  # multi-platform image.tag and set kubernetes.io/arch: arm64.
   nodeSelector:
     kubernetes.io/arch: amd64
   tolerations: []
@@ -78,7 +79,8 @@ superAgent:
     limits:
       cpu: "1"
       memory: 1Gi
-  # The edge image is built for linux/amd64 only.
+  # AMD64 remains the default for older image tags. For ARM64, use a verified
+  # multi-platform image.tag and set kubernetes.io/arch: arm64.
   nodeSelector:
     kubernetes.io/arch: amd64
   # Permission mode for the super-agent. MUST be "readwrite" — the agent
