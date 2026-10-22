@@ -9,7 +9,7 @@
 #
 # Install:
 #   helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-#     --version 0.3.0 -f my-values.yaml --namespace clustermind
+#     --version 0.3.1 -f my-values.yaml --namespace clustermind
 
 controlPlane:
   existingSecret: clustermind-agent-token  # pragma: allowlist secret

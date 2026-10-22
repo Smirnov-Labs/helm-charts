@@ -2,11 +2,11 @@ apiVersion: v2
 name: clustermind-edge
 description: ClusterMind Edge - Kubernetes diagnostic agent with AI-powered cluster analysis
 type: application
-version: 0.3.0
+version: 0.3.1
 # The edge image tag the chart deploys unless image.tag is set. Keep it a released
 # vX.Y.Z tag of ghcr.io/smirnov-labs/clustermind-edge. The publish workflow sets only
 # `version` from the git tag, never this.
-appVersion: "v1.9.4"
+appVersion: "v1.9.5"
 # Redis runs as a native sidecar (an init container with restartPolicy: Always).
 kubeVersion: ">=1.29.0-0"
 home: https://clustermind.ai
