@@ -11,7 +11,7 @@ Helm charts for [ClusterMind](https://clustermind.ai), AI diagnostics for Kubern
 You need:
 
 - Kubernetes 1.29 or later, managed (EKS, GKE, AKS) or self-hosted. The agent checks Longhorn, Argo CD and cert-manager where they are installed, and needs none of them.
-- Linux AMD64 or ARM64 nodes, including mixed clusters. Chart 0.3.2 selects the matching image automatically; see [Node architectures](#node-architectures).
+- Linux AMD64 or ARM64 nodes, including mixed clusters. Chart 0.3.2 and later select the matching image automatically; see [Node architectures](#node-architectures).
 - Outbound HTTPS from the cluster to api.clustermind.ai.
 - A default StorageClass, for the agent's 1Gi Redis volume. New EKS clusters have none; see [Storage](#storage).
 - Helm 3.8 or later.
@@ -31,7 +31,7 @@ You need:
 
    ```bash
    helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-     --version 0.3.2 \
+     --version 0.3.3 \
      --namespace clustermind \
      --set controlPlane.existingSecret=clustermind-agent-token
    ```
@@ -51,15 +51,14 @@ The chart won't install into the `default` namespace, or without a token.
 
 ### Node architectures
 
-Chart **0.3.2** works on Linux AMD64, ARM64 and mixed clusters with the same
-installation command. Both agents select Linux nodes without an architecture
+Chart **0.3.2** and later work on Linux AMD64, ARM64 and mixed clusters with the
+same installation command. Both agents select Linux nodes without an architecture
 restriction. Kubernetes pulls the matching variant of the multi-platform image
 for whichever node runs the pod. Redis also supports both architectures.
 
-The default edge image is the verified build `54eadc9`, from
-[claude-k8s commit 54eadc9](https://github.com/Smirnov-Labs/claude-k8s/commit/54eadc928537ee6d0238077de2cb56133e50f69c).
-Both architectures passed native runtime and bundled-tool checks. It is pinned
-to a commit tag, so chart installs do not follow the mutable `latest` tag.
+The default edge image is release `v1.9.7`. CI built it on native AMD64 and ARM64
+runners and ran the runtime and bundled-tool checks on each before publishing it.
+Chart installs pin that tag, so they do not follow the mutable `latest` tag.
 
 You can still restrict either agent with `agent.nodeSelector` or
 `superAgent.nodeSelector`. Custom image overrides must support the architectures
@@ -72,7 +71,7 @@ settings, for example:
 
 ```bash
 helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-  --version 0.3.2 --namespace clustermind --reset-values \
+  --version 0.3.3 --namespace clustermind --reset-values \
   --set controlPlane.existingSecret=clustermind-agent-token
 ```
 
