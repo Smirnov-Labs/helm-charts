@@ -1,0 +1,10 @@
+# ARM64 scheduling for both agent modes. Use with a multi-platform image tag.
+agent:
+  nodeSelector:
+    kubernetes.io/os: linux
+    kubernetes.io/arch: arm64
+superAgent:
+  enabled: true
+  nodeSelector:
+    kubernetes.io/os: linux
+    kubernetes.io/arch: arm64

@@ -11,7 +11,7 @@ Helm charts for [ClusterMind](https://clustermind.ai), AI diagnostics for Kubern
 You need:
 
 - Kubernetes 1.29 or later, managed (EKS, GKE, AKS) or self-hosted. The agent checks Longhorn, Argo CD and cert-manager where they are installed, and needs none of them.
-- Nodes running linux/amd64. We build the agent image for amd64 only.
+- Linux nodes. The default image (v1.9.5) supports AMD64. ARM64 requires a multi-platform image tag; see [ARM64 nodes](#arm64-nodes).
 - Outbound HTTPS from the cluster to api.clustermind.ai.
 - A default StorageClass, for the agent's 1Gi Redis volume. New EKS clusters have none; see [Storage](#storage).
 - Helm 3.8 or later.
@@ -47,6 +47,36 @@ kubectl -n clustermind logs statefulset/clustermind-edge -c agent
 If the log shows `websocket_connection_failed` with `"reason": "unauthorized"`, the Secret doesn't hold the cluster's current token.
 
 The chart won't install into the `default` namespace, or without a token.
+
+### ARM64 nodes
+
+The chart supports ARM64 scheduling for both the regular agent and the optional
+super-agent. Chart 0.3.1's default image, `v1.9.5`, is AMD64-only. Until the chart
+pins a multi-platform release, supply a verified multi-platform image tag:
+
+```bash
+docker buildx imagetools inspect ghcr.io/smirnov-labs/clustermind-edge:<multi-platform-tag>
+```
+
+Confirm it lists **linux/amd64** and **linux/arm64**, then install with an override
+file (both selectors are needed if you later enable the super-agent):
+
+```yaml
+image:
+  tag: "<multi-platform-tag>"
+agent:
+  nodeSelector:
+    kubernetes.io/os: linux
+    kubernetes.io/arch: arm64
+superAgent:
+  nodeSelector:
+    kubernetes.io/os: linux
+    kubernetes.io/arch: arm64
+```
+
+Pass this file with `-f arm64-values.yaml` alongside your usual namespace and
+agent-token settings. The default Redis image, `redis:7-alpine`, also supports
+ARM64. Custom image overrides must support the selected architecture.
 
 ### Storage
 
