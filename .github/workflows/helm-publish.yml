@@ -67,15 +67,26 @@ jobs:
             --set diagnostics.localFallback.enabled=true > /dev/null
           helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
             -f "$CHART/ci/arm64-values.yaml" > /tmp/arm64-chart.yaml
+          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
+            --set superAgent.enabled=true > /tmp/default-chart.yaml
+          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
+            --set superAgent.enabled=true \
+            --set 'agent.nodeSelector.kubernetes\.io/arch=amd64' \
+            --set 'superAgent.nodeSelector.kubernetes\.io/arch=amd64' > /tmp/amd64-chart.yaml
           python3 - <<'PYTHON'
           import yaml
-          workloads = [doc for doc in yaml.safe_load_all(open('/tmp/arm64-chart.yaml'))
-                       if doc and doc.get('kind') in ('StatefulSet', 'Deployment')]
-          assert len(workloads) == 2, workloads
-          for workload in workloads:
-              selector = workload['spec']['template']['spec']['nodeSelector']
-              assert selector['kubernetes.io/arch'] == 'arm64', workload['metadata']['name']
-              assert selector['kubernetes.io/os'] == 'linux', workload['metadata']['name']
+          chart = yaml.safe_load(open('charts/clustermind-edge/Chart.yaml'))
+          expected_image = 'ghcr.io/smirnov-labs/clustermind-edge:' + chart['appVersion']
+          for name, architecture in [('default', None), ('amd64', 'amd64'), ('arm64', 'arm64')]:
+              workloads = [doc for doc in yaml.safe_load_all(open('/tmp/' + name + '-chart.yaml'))
+                           if doc and doc.get('kind') in ('StatefulSet', 'Deployment')]
+              assert len(workloads) == 2, (name, workloads)
+              for workload in workloads:
+                  pod = workload['spec']['template']['spec']
+                  selector = pod['nodeSelector']
+                  assert selector.get('kubernetes.io/arch') == architecture, (name, selector)
+                  assert selector['kubernetes.io/os'] == 'linux', (name, selector)
+                  assert any(c['image'] == expected_image for c in pod['containers']), (name, pod)
           PYTHON
           if helm template clustermind-edge "$CHART" -f "$CHART/ci/test-values.yaml" > /dev/null 2>&1; then
             echo "::error::the chart rendered into the default namespace; it must refuse"
@@ -85,6 +96,26 @@ jobs:
             echo "::error::the chart rendered without an agent token; it must refuse"
             exit 1
           fi
+
+      - name: Verify default image supports AMD64 and ARM64
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import subprocess
+          import yaml
+          from pathlib import Path
+          chart = Path('charts/clustermind-edge')
+          metadata = yaml.safe_load((chart / 'Chart.yaml').read_text())
+          values = yaml.safe_load((chart / 'values.yaml').read_text())
+          image = (values['global']['imageRegistry'] + '/' + values['image']['repository']
+                   + ':' + (values['image']['tag'] or metadata['appVersion']))
+          index = json.loads(subprocess.check_output(
+              ['docker', 'buildx', 'imagetools', 'inspect', image, '--raw'], text=True))
+          platforms = {(m.get('platform', {}).get('os'), m.get('platform', {}).get('architecture'))
+                       for m in index.get('manifests', [])}
+          assert {('linux', 'amd64'), ('linux', 'arm64')} <= platforms, (image, platforms)
+          print(image + ' supports linux/amd64 and linux/arm64')
+          PYTHON
 
       - name: Package chart
         if: github.event_name != 'pull_request'

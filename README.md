@@ -11,7 +11,7 @@ Helm charts for [ClusterMind](https://clustermind.ai), AI diagnostics for Kubern
 You need:
 
 - Kubernetes 1.29 or later, managed (EKS, GKE, AKS) or self-hosted. The agent checks Longhorn, Argo CD and cert-manager where they are installed, and needs none of them.
-- Linux nodes. The default image (v1.9.5) supports AMD64. ARM64 requires a multi-platform image tag; see [ARM64 nodes](#arm64-nodes).
+- Linux AMD64 or ARM64 nodes, including mixed clusters. Chart 0.3.2 selects the matching image automatically; see [Node architectures](#node-architectures).
 - Outbound HTTPS from the cluster to api.clustermind.ai.
 - A default StorageClass, for the agent's 1Gi Redis volume. New EKS clusters have none; see [Storage](#storage).
 - Helm 3.8 or later.
@@ -31,6 +31,7 @@ You need:
 
    ```bash
    helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
+     --version 0.3.2 \
      --namespace clustermind \
      --set controlPlane.existingSecret=clustermind-agent-token
    ```
@@ -48,35 +49,32 @@ If the log shows `websocket_connection_failed` with `"reason": "unauthorized"`, 
 
 The chart won't install into the `default` namespace, or without a token.
 
-### ARM64 nodes
+### Node architectures
 
-The chart supports ARM64 scheduling for both the regular agent and the optional
-super-agent. Chart 0.3.1's default image, `v1.9.5`, is AMD64-only. Until the chart
-pins a multi-platform release, supply a verified multi-platform image tag:
+Chart **0.3.2** works on Linux AMD64, ARM64 and mixed clusters with the same
+installation command. Both agents select Linux nodes without an architecture
+restriction. Kubernetes pulls the matching variant of the multi-platform image
+for whichever node runs the pod. Redis also supports both architectures.
+
+The default edge image is the verified build `54eadc9`, from
+[claude-k8s commit 54eadc9](https://github.com/Smirnov-Labs/claude-k8s/commit/54eadc928537ee6d0238077de2cb56133e50f69c).
+Both architectures passed native runtime and bundled-tool checks. It is pinned
+to a commit tag, so chart installs do not follow the mutable `latest` tag.
+
+You can still restrict either agent with `agent.nodeSelector` or
+`superAgent.nodeSelector`. Custom image overrides must support the architectures
+you allow. Chart 0.3.1 and earlier still default to AMD64-only images.
+
+When upgrading an existing release, remove old `image.tag` and architecture
+overrides if you want automatic selection. To discard values retained by earlier
+installs, use `--reset-values` and reapply your token, storage and other custom
+settings, for example:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/smirnov-labs/clustermind-edge:<multi-platform-tag>
+helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
+  --version 0.3.2 --namespace clustermind --reset-values \
+  --set controlPlane.existingSecret=clustermind-agent-token
 ```
-
-Confirm it lists **linux/amd64** and **linux/arm64**, then install with an override
-file (both selectors are needed if you later enable the super-agent):
-
-```yaml
-image:
-  tag: "<multi-platform-tag>"
-agent:
-  nodeSelector:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: arm64
-superAgent:
-  nodeSelector:
-    kubernetes.io/os: linux
-    kubernetes.io/arch: arm64
-```
-
-Pass this file with `-f arm64-values.yaml` alongside your usual namespace and
-agent-token settings. The default Redis image, `redis:7-alpine`, also supports
-ARM64. Custom image overrides must support the selected architecture.
 
 ### Storage
 
@@ -165,7 +163,8 @@ Every value is in [values.yaml](charts/clustermind-edge/values.yaml). The ones y
 | `redis.persistence.storageClass` | `""` | StorageClass for the Redis volume. Empty uses the cluster default. |
 | `redis.persistence.enabled` | `true` | `false` keeps Redis in memory |
 | `superAgent.enabled` | `false` | Run changes approved in the dashboard |
-| `agent.nodeSelector` | `kubernetes.io/arch: amd64` | Nodes the agent can run on |
+| `agent.nodeSelector` | `kubernetes.io/os: linux` | Nodes the agent can run on; AMD64 and ARM64 are selected automatically |
+| `superAgent.nodeSelector` | `kubernetes.io/os: linux` | Nodes the optional super-agent can run on |
 | `metrics.serviceMonitor.enabled` | `false` | Create a Prometheus Operator ServiceMonitor |
 | `metrics.prometheusRule.enabled` | `false` | Create alert rules, including one for a rejected agent token |
 
