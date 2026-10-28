@@ -56,7 +56,7 @@ jobs:
         run: python3 -m pip install PyYAML==6.0.3
 
       - name: Render chart
-        run: |
+        run: |  # pragma: allowlist secret
           CHART="charts/${{ steps.chart.outputs.name }}"
           helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" > /dev/null
           helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
@@ -96,6 +96,121 @@ jobs:
             echo "::error::the chart rendered without an agent token; it must refuse"
             exit 1
           fi
+          # With the super-agent off, Redis listens on localhost and the Service lists the http
+          # and metrics ports. With it on, Redis requires a password, the Service adds the Redis
+          # port, and the super-agent has its own executor token.
+          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" > /tmp/no-super-agent.yaml
+          python3 - <<'PYTHON'
+          import os
+          import subprocess
+          import tempfile
+          import yaml
+          def docs(path):
+              return [d for d in yaml.safe_load_all(open(path)) if d]
+          def redis_cmd(ds):
+              sts = next(d for d in ds if d['kind'] == 'StatefulSet')
+              return next(c for c in sts['spec']['template']['spec']['initContainers'] if c['name'] == 'redis')['command']
+          def edge_service_ports(ds):
+              svc = next(d for d in ds if d['kind'] == 'Service' and not d['metadata']['name'].endswith('super-agent'))
+              return [p['port'] for p in svc['spec']['ports']]
+          plain, full = docs('/tmp/no-super-agent.yaml'), docs('/tmp/default-chart.yaml')
+          assert '--bind' in redis_cmd(plain) and '127.0.0.1' in redis_cmd(plain), redis_cmd(plain)
+          assert '--requirepass' not in redis_cmd(plain), redis_cmd(plain)
+          assert 6379 not in edge_service_ports(plain), edge_service_ports(plain)
+          assert '--requirepass' in redis_cmd(full) and '$(REDIS_PASSWORD)' in redis_cmd(full), redis_cmd(full)
+          assert 6379 in edge_service_ports(full)
+          deployment = next(d for d in full if d['kind'] == 'Deployment')
+          env = {e['name']: e for e in deployment['spec']['template']['spec']['containers'][0]['env']}
+          assert env['EXECUTOR_TOKEN']['valueFrom']['secretKeyRef'] == {'name': 'clustermind-super-agent-token', 'key': 'EXECUTOR_TOKEN'}, env['EXECUTOR_TOKEN']
+          assert env['REDIS_PASSWORD']['valueFrom']['secretKeyRef']['name'] == 'clustermind-redis-auth'
+          pod = next(d for d in full if d['kind'] == 'StatefulSet')['spec']['template']['spec']
+          sidecar = next(c for c in pod['initContainers'] if c['name'] == 'redis')
+          agent = next(c for c in pod['containers'] if c['name'] == 'agent')
+          assert {'REDIS_PASSWORD', 'REDISCLI_AUTH'} <= {e['name'] for e in sidecar['env']}, sidecar['env']
+          assert 'REDIS_PASSWORD' in {e['name'] for e in agent['env']}, agent['env']
+          for workload in (d for d in full if d['kind'] in ('StatefulSet', 'Deployment')):
+              spec = workload['spec']['template']['spec']
+              for container in spec.get('initContainers', []) + spec['containers']:
+                  for e in container.get('env', []):
+                      assert e['name'] != 'REDIS_URL' or '@' not in e.get('value', ''), 'REDIS_URL of ' + container['name'] + ' contains @'
+          # While the super-agent runs, Redis starts only with a password of 16 or more
+          # characters. The command is checked as rendered, then run with a stand-in redis-server.
+          auth_cmd = redis_cmd(full)
+          assert auth_cmd[:2] == ['sh', '-c'] and auth_cmd[3] == 'redis-server', auth_cmd
+          assert '${#REDIS_PASSWORD}' in auth_cmd[2] and '-lt 16' in auth_cmd[2] and 'exec redis-server "$@"' in auth_cmd[2], auth_cmd[2]
+          assert redis_cmd(plain)[0] == 'redis-server' and not any('REDIS_PASSWORD' in word for word in redis_cmd(plain)), redis_cmd(plain)
+          stub_dir = tempfile.mkdtemp()
+          stub_out = os.path.join(stub_dir, 'argv')
+          with open(os.path.join(stub_dir, 'redis-server'), 'w') as stub:
+              stub.write('#!/bin/sh\nprintf "%s\\n" "$@" > "$STUB_OUT"\n')
+          os.chmod(os.path.join(stub_dir, 'redis-server'), 0o755)
+          def start_redis(password):
+              # The kubelet expands $(REDIS_PASSWORD) before it starts the container.
+              argv = [word.replace('$(REDIS_PASSWORD)', password) for word in auth_cmd]
+              env = dict(os.environ, PATH=stub_dir + os.pathsep + os.environ['PATH'], REDIS_PASSWORD=password, STUB_OUT=stub_out)
+              if os.path.exists(stub_out):
+                  os.remove(stub_out)
+              result = subprocess.run(argv, env=env, capture_output=True, text=True)
+              return result, os.path.exists(stub_out)
+          for password in ('', 'x', 'x' * 15):
+              result, started = start_redis(password)
+              assert result.returncode != 0 and not started and 'at least 16 characters' in result.stderr, ('a password of ' + str(len(password)) + ' characters must stop Redis', result)
+          result, started = start_redis('x' * 16)
+          assert result.returncode == 0 and started, ('a password of 16 characters must start Redis', result)
+          started_with = open(stub_out).read().splitlines()
+          assert started_with[started_with.index('--requirepass') + 1] == 'x' * 16 and '--appendonly' in started_with, started_with
+          PYTHON
+          # Each case below must be refused with the chart's own message. An upgrade with
+          # --reuse-values uses the values of the old release, which hold only the keys that
+          # release defined; the from_033 flags give the merged values that shape.
+          refuse() {
+            expected="$1"
+            shift
+            if output=$(helm template clustermind-edge "$CHART" --namespace clustermind "$@" 2>&1); then
+              echo "::error::the chart rendered with: $*; it must refuse"
+              exit 1
+            fi
+            if [[ "$output" != *"$expected"* ]]; then
+              echo "::error::the chart refused with: $*; the error lacks: $expected"
+              echo "$output"
+              exit 1
+            fi
+          }
+          renders() {
+            if ! output=$(helm template clustermind-edge "$CHART" --namespace clustermind "$@" 2>&1); then
+              echo "::error::the chart refused: $*; it must render"
+              echo "$output"
+              exit 1
+            fi
+          }
+          values="$CHART/ci/test-values.yaml"
+          needs_token="superAgent.enabled needs the executor token from the dashboard (Clusters, then Connection settings, then the key icon"
+          needs_password="superAgent.enabled needs a Redis password"
+          from_033=(--set redis.auth=null --set superAgent.executorToken=null
+                    --set superAgent.existingSecret=null --set superAgent.existingSecretKey=null)
+          # The values of an upgrade from 0.3.3 render while the super-agent is off.
+          renders -f "$values" "${from_033[@]}"
+          refuse "$needs_token" -f "$values" --set superAgent.enabled=true --set superAgent.existingSecret=
+          refuse "$needs_password" -f "$values" --set superAgent.enabled=true --set redis.auth.existingSecret=
+          refuse "superAgent.enabled needs the chart's Redis" -f "$values" --set superAgent.enabled=true --set redis.enabled=false
+          refuse "superAgent.enabled needs controlPlane.url" -f "$values" --set superAgent.enabled=true --set controlPlane.url= --set slack.existingSecret=clustermind-slack
+          refuse "$needs_token" -f "$values" "${from_033[@]}" --set superAgent.enabled=true
+          refuse "$needs_password" -f "$values" "${from_033[@]}" --set superAgent.enabled=true --set superAgent.existingSecret=clustermind-super-agent-token
+          # The super-agent needs edge v1.10.0 or later. An image.tag that starts with an earlier
+          # version is refused, with or without the v and a suffix. v1.10.0 and later render, and
+          # so do an empty tag and a tag that is no version. With the super-agent off, any tag renders.
+          needs_edge="superAgent.enabled needs edge v1.10.0 or later"
+          for tag in v1.9.7 1.9.7 v1.9.7-rc.1; do
+            refuse "$needs_edge" -f "$values" --set superAgent.enabled=true --set "image.tag=$tag"
+          done
+          # The message says how to get past it, and that works: a later --set image.tag= replaces
+          # the earlier tag, including one that --reset-then-reuse-values brings back.
+          refuse "Add --set image.tag= to the helm command, or set image.tag to v1.10.0 or later." -f "$values" --set superAgent.enabled=true --set image.tag=v1.9.7
+          renders -f "$values" --set superAgent.enabled=true --set image.tag=v1.9.7 --set image.tag=
+          for tag in v1.10.0 1.10.0 v1.10.0-rc.1 v1.11.0 latest sha256-abc123 ""; do
+            renders -f "$values" --set superAgent.enabled=true --set "image.tag=$tag"
+          done
+          renders -f "$values" --set image.tag=v1.9.7
 
       - name: Verify default image supports AMD64 and ARM64
         run: |
