@@ -84,6 +84,19 @@ spec:
           # and coordination state, such as Slack thread ownership and the verification
           # handoff. RDB alone rolls that state back on an ungraceful restart.
           command:
+            {{- if include "clustermind-edge.redisAuth" . }}
+            # Redis starts only with a password of 16 or more characters, and says so on stderr
+            # otherwise. exec makes redis-server the main process, and "$@" hands it the
+            # options below. The shell reads the password from the env above.
+            - sh
+            - -c
+            - |
+              if [ "${#REDIS_PASSWORD}" -lt 16 ]; then
+                echo "REDIS_PASSWORD must be at least 16 characters. Put a longer value in the Redis password Secret, for example the output of: openssl rand -hex 32" >&2
+                exit 1
+              fi
+              exec redis-server "$@"
+            {{- end }}
             - redis-server
             - --appendonly
             - "yes"

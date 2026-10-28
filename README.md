@@ -126,6 +126,49 @@ Generate the executor token in the dashboard: open Clusters, then Connection set
 
 [rbac-readwrite.yaml](charts/clustermind-edge/templates/rbac-readwrite.yaml) lists everything it can do.
 
+### Rotate the executor token and the Redis password
+
+After you regenerate the executor token in the dashboard, run the commands it shows. They update the Secret and restart the super-agent, which reads the token only at startup:
+
+```bash
+kubectl -n clustermind create secret generic clustermind-super-agent-token \
+  --from-literal=EXECUTOR_TOKEN=<new executor token> \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n clustermind rollout restart deployment/clustermind-edge-super-agent
+```
+
+Those commands update `clustermind-super-agent-token`. If you gave the token to the chart with `superAgent.executorToken`, the chart keeps it in a Secret of its own (`clustermind-edge-super-agent-token` for a release named `clustermind-edge`), so change the token with Helm instead, and the super-agent restarts by itself. `read -rs` waits for you to paste the token without echoing it, so it stays out of your shell history:
+
+```bash
+read -rs EXECUTOR_TOKEN
+helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
+  --namespace clustermind \
+  --reset-then-reuse-values \
+  --set superAgent.executorToken="$EXECUTOR_TOKEN"
+unset EXECUTOR_TOKEN
+```
+
+To rotate the Redis password, change the Secret, then restart the agent's StatefulSet and the super-agent. Each reads the password only at startup:
+
+```bash
+kubectl -n clustermind create secret generic clustermind-redis-auth \
+  --from-literal=REDIS_PASSWORD="$(openssl rand -hex 32)" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n clustermind rollout restart statefulset/clustermind-edge
+kubectl -n clustermind rollout restart deployment/clustermind-edge-super-agent
+```
+
+If you gave the password to the chart with `redis.auth.password`, change it with Helm instead, and both pods restart by themselves. `read -rs` waits for you to paste the new password (at least 16 characters, such as the output of `openssl rand -hex 32`) without echoing it, so it stays out of your shell history:
+
+```bash
+read -rs REDIS_PASSWORD
+helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
+  --namespace clustermind \
+  --reset-then-reuse-values \
+  --set redis.auth.password="$REDIS_PASSWORD"
+unset REDIS_PASSWORD
+```
+
 ### Upgrade
 
 Run `helm upgrade` with the flags you installed with. Each chart version deploys the agent version in its `appVersion`; set `image.tag` to run a different release.
@@ -148,7 +191,11 @@ Run `helm upgrade` with the flags you installed with. Each chart version deploys
 
 **Upgrading to 0.4.0:**
 
-With `superAgent.enabled`, the chart needs the executor token from the dashboard and a Redis password. Create both Secrets and set `superAgent.existingSecret` and `redis.auth.existingSecret`, as in "Let the agent make changes". Upgrade with `--reset-then-reuse-values`, which adds 0.4.0's new defaults to the values you installed with; `--reuse-values` takes the installed values alone. With the super-agent off, your existing values are enough: Redis listens on localhost, and the Service lists the http and metrics ports.
+With `superAgent.enabled`, the chart needs the executor token from the dashboard, a Redis password of at least 16 characters, and edge v1.10.0 or later. Create both Secrets and set `superAgent.existingSecret` and `redis.auth.existingSecret`, as in "Let the agent make changes". Upgrade with `--reset-then-reuse-values`, which adds 0.4.0's new defaults to the values you installed with; `--reuse-values` takes the installed values alone.
+
+If you set `image.tag` to an earlier release, add `--set image.tag=` to the `helm upgrade` to remove it, or set it to `v1.10.0` or later. `--reset-then-reuse-values` keeps the value you installed with, and the chart stops the upgrade on an earlier release.
+
+With the super-agent off, your existing values are enough: Redis listens on localhost, and the Service lists the http and metrics ports.
 
 ### Uninstall
 
@@ -176,10 +223,10 @@ Every value is in [values.yaml](charts/clustermind-edge/values.yaml). The ones y
 | `controlPlane.clusterApiKey` | `""` | The token itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. |
 | `redis.persistence.storageClass` | `""` | StorageClass for the Redis volume. Empty uses the cluster default. |
 | `redis.persistence.enabled` | `true` | `false` keeps Redis in memory |
-| `redis.auth.existingSecret` | `""` | Secret with the Redis password. With `superAgent.enabled`, set this or `redis.auth.password`. |
+| `redis.auth.existingSecret` | `""` | Secret with the Redis password, at least 16 characters. With `superAgent.enabled`, set this or `redis.auth.password`. |
 | `redis.auth.existingSecretKey` | `REDIS_PASSWORD` | Key in that Secret that holds the Redis password |
-| `redis.auth.password` | `""` | The Redis password itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. Use a long random value, such as `openssl rand -hex 32`. |
-| `superAgent.enabled` | `false` | Run changes approved in the dashboard. Needs the executor token and a Redis password. |
+| `redis.auth.password` | `""` | The Redis password itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. At least 16 characters; Redis does not start with a shorter one. Use a long random value, such as `openssl rand -hex 32`. |
+| `superAgent.enabled` | `false` | Run changes approved in the dashboard. Needs the executor token, a Redis password and edge v1.10.0 or later. |
 | `superAgent.existingSecret` | `""` | Secret with the executor token from the dashboard. With `superAgent.enabled`, set this or `superAgent.executorToken`. |
 | `superAgent.existingSecretKey` | `EXECUTOR_TOKEN` | Key in that Secret that holds the executor token |
 | `superAgent.executorToken` | `""` | The executor token itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. |

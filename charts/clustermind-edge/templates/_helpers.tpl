@@ -186,8 +186,21 @@ report by crash-looping.
 {{- fail "Set controlPlane.url and its agent token, or the slack values for direct Slack mode." }}
 {{- end }}
 {{- if .Values.superAgent.enabled }}
+{{- /*
+The super-agent and the Redis password need edge v1.10.0 or later. Only a tag that starts with
+a version is checked, and only that version part is compared, so v1.9.7-rc.1 counts as 1.9.7.
+Any other tag, such as latest or a commit-style tag, is left alone. The ifs are nested because
+Helm 3.8 evaluates every argument of and.
+*/}}
+{{- $tag := toString .Values.image.tag }}
+{{- $version := regexFind `^v?[0-9]+\.[0-9]+\.[0-9]+` $tag }}
+{{- if $version }}
+{{- if semverCompare "<1.10.0-0" $version }}
+{{- fail (printf "superAgent.enabled needs edge v1.10.0 or later, but image.tag is %s. Add --set image.tag= to the helm command, or set image.tag to v1.10.0 or later." $tag) }}
+{{- end }}
+{{- end }}
 {{- if not (or (dig "executorToken" "" .Values.superAgent) (dig "existingSecret" "" .Values.superAgent)) }}
-{{- fail "superAgent.enabled needs the executor token from the dashboard (Clusters → Generate executor token): set superAgent.existingSecret, or superAgent.executorToken. The super-agent claims approved changes with it." }}
+{{- fail "superAgent.enabled needs the executor token from the dashboard (Clusters, then Connection settings, then the key icon on the cluster's row): set superAgent.existingSecret, or superAgent.executorToken. The super-agent claims approved changes with it." }}
 {{- end }}
 {{- if not .Values.controlPlane.url }}
 {{- fail "superAgent.enabled needs controlPlane.url: the super-agent claims approvals from the control plane." }}

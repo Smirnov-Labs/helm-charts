@@ -30,7 +30,7 @@ spec:
     spec:
       serviceAccountName: {{ include "clustermind-edge.superAgentServiceAccountName" . }}
       # SIGTERM starts the super-agent's graceful shutdown. That takes about 1s when
-      # idle and up to about 25s when an approved change is in flight.
+      # idle and up to about 45s when an approved change is in flight.
       terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
@@ -128,9 +128,10 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          # The HTTP server listens only once startup is done, and startup waits up to
-          # ~75s for the edge pod's Redis. The startup probe holds liveness off for up
-          # to 150s.
+          # The HTTP server listens once startup is done. Startup does not wait for Redis:
+          # the super-agent's Redis client connects on first use. /health answers while the
+          # approval executor runs, and /ready also needs the edge pod's Redis. The startup
+          # probe holds liveness off until /health first answers, for up to 150s.
           startupProbe:
             httpGet:
               path: /health

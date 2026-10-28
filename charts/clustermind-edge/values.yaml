@@ -52,6 +52,7 @@ agent:
 
 redis:
   enabled: true
+  # While the super-agent runs, the container starts Redis through sh, so the image needs one.
   image: redis:7-alpine
   resources:
     requests:
@@ -72,21 +73,22 @@ redis:
   # to it from its own pod. Otherwise Redis listens on localhost, for the agent in its pod.
   # Set existingSecret (an existing Secret in the release namespace) or password (the chart
   # stores it in a Secret); existingSecret keeps it out of Helm's release history and works
-  # with Argo CD. Use a long random value for the password, such as the output of
-  # openssl rand -hex 32.
+  # with Argo CD. The password must be at least 16 characters: Redis does not start with a
+  # shorter one. Use a long random value, such as the output of openssl rand -hex 32.
   auth:
     existingSecret: ""
     existingSecretKey: "REDIS_PASSWORD"  # pragma: allowlist secret
     password: ""
 
 # The privileged executor. It runs changes a person approved in the dashboard, with
-# broad write access to the cluster. While it is off, the agent can only read.
+# broad write access to the cluster. While it is off, the agent can only read. It needs
+# edge v1.10.0 or later: leave image.tag empty, or set it to v1.10.0 or later.
 superAgent:
   enabled: false
-  # The executor token from the dashboard (Clusters → Generate executor token). The
-  # super-agent claims approved changes with it, so it is required while enabled.
-  # existingSecret names a Secret in the release namespace that holds it; executorToken puts
-  # it in a Secret the chart creates.
+  # The executor token from the dashboard (Clusters, then Connection settings, then the key
+  # icon on the cluster's row). The super-agent claims approved changes with it, so it is
+  # required while enabled. existingSecret names a Secret in the release namespace that holds
+  # it; executorToken puts it in a Secret the chart creates.
   executorToken: ""
   existingSecret: ""
   existingSecretKey: "EXECUTOR_TOKEN"  # pragma: allowlist secret
