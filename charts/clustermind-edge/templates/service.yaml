@@ -19,10 +19,10 @@ spec:
       port: 9090
       targetPort: metrics
       protocol: TCP
-    {{- if .Values.redis.enabled }}
-    # The super-agent reaches the edge pod's Redis through this port. Redis is a
-    # native sidecar (an init container), and resolving a named targetPort on one
-    # depends on the Kubernetes version, so target the number.
+    {{- if include "clustermind-edge.redisAuth" . }}
+    # This port is listed while the super-agent runs: the super-agent reaches the edge pod's
+    # Redis through it. Redis is a native sidecar (an init container), and resolving a named
+    # targetPort on one depends on the Kubernetes version, so target the number.
     - name: redis
       port: 6379
       targetPort: 6379

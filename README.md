@@ -31,7 +31,7 @@ You need:
 
    ```bash
    helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-     --version 0.3.3 \
+     --version 0.4.0 \
      --namespace clustermind \
      --set controlPlane.existingSecret=clustermind-agent-token
    ```
@@ -56,7 +56,7 @@ same installation command. Both agents select Linux nodes without an architectur
 restriction. Kubernetes pulls the matching variant of the multi-platform image
 for whichever node runs the pod. Redis also supports both architectures.
 
-The default edge image is release `v1.9.7`. CI built it on native AMD64 and ARM64
+The default edge image is release `v1.10.0`. CI built it on native AMD64 and ARM64
 runners and ran the runtime and bundled-tool checks on each before publishing it.
 Chart installs pin that tag, so they do not follow the mutable `latest` tag.
 
@@ -71,13 +71,13 @@ settings, for example:
 
 ```bash
 helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-  --version 0.3.3 --namespace clustermind --reset-values \
+  --version 0.4.0 --namespace clustermind --reset-values \
   --set controlPlane.existingSecret=clustermind-agent-token
 ```
 
 ### Storage
 
-Redis keeps the agent's approval and investigation state on a 1Gi volume from the cluster's default StorageClass. If the cluster has no default StorageClass, the install stops and says so. Then either name a class:
+Redis keeps the agent's conversations and Slack thread ownership on a 1Gi volume from the cluster's default StorageClass. If the cluster has no default StorageClass, the install stops and says so. Then either name a class:
 
 ```bash
 --set redis.persistence.storageClass=gp3
@@ -109,11 +109,20 @@ By default the agent can read the cluster and change nothing. It cannot read Sec
 The super-agent runs changes that someone approved in the dashboard, such as restarting a deployment or cordoning a node. It has broad write access, Secrets included, so it is off by default. To turn it on:
 
 ```bash
+kubectl -n clustermind create secret generic clustermind-super-agent-token \
+  --from-literal=EXECUTOR_TOKEN=<executor token> \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n clustermind create secret generic clustermind-redis-auth \
+  --from-literal=REDIS_PASSWORD="$(openssl rand -hex 32)"
 helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
   --namespace clustermind \
-  --set controlPlane.existingSecret=clustermind-agent-token \
-  --set superAgent.enabled=true
+  --reset-then-reuse-values \
+  --set superAgent.enabled=true \
+  --set superAgent.existingSecret=clustermind-super-agent-token \
+  --set redis.auth.existingSecret=clustermind-redis-auth
 ```
+
+Generate the executor token in the dashboard: open Clusters, then Connection settings, and click the key icon on the cluster's row. `--reset-then-reuse-values` needs Helm 3.14 or later. It keeps the values you installed with and adds the new chart's defaults.
 
 [rbac-readwrite.yaml](charts/clustermind-edge/templates/rbac-readwrite.yaml) lists everything it can do.
 
@@ -137,6 +146,10 @@ Run `helm upgrade` with the flags you installed with. Each chart version deploys
 
   The pod is `clustermind-edge-0` if you named the release `clustermind-edge`.
 
+**Upgrading to 0.4.0:**
+
+With `superAgent.enabled`, the chart needs the executor token from the dashboard and a Redis password. Create both Secrets and set `superAgent.existingSecret` and `redis.auth.existingSecret`, as in "Let the agent make changes". Upgrade with `--reset-then-reuse-values`, which adds 0.4.0's new defaults to the values you installed with; `--reuse-values` takes the installed values alone. With the super-agent off, your existing values are enough: Redis listens on localhost, and the Service lists the http and metrics ports.
+
 ### Uninstall
 
 ```bash
@@ -151,6 +164,8 @@ Helm leaves the Redis volume behind, so delete it yourself or keep it for a rein
 
 Without the control plane, the agent can take Slack events itself. Set `controlPlane.url=""`, the `slack` values, and `ingress` so Slack can reach `/slack/events`. Installs that use app.clustermind.ai don't need any of this.
 
+The super-agent needs the control plane.
+
 ### Configuration
 
 Every value is in [values.yaml](charts/clustermind-edge/values.yaml). The ones you are most likely to set:
@@ -161,7 +176,13 @@ Every value is in [values.yaml](charts/clustermind-edge/values.yaml). The ones y
 | `controlPlane.clusterApiKey` | `""` | The token itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. |
 | `redis.persistence.storageClass` | `""` | StorageClass for the Redis volume. Empty uses the cluster default. |
 | `redis.persistence.enabled` | `true` | `false` keeps Redis in memory |
-| `superAgent.enabled` | `false` | Run changes approved in the dashboard |
+| `redis.auth.existingSecret` | `""` | Secret with the Redis password. With `superAgent.enabled`, set this or `redis.auth.password`. |
+| `redis.auth.existingSecretKey` | `REDIS_PASSWORD` | Key in that Secret that holds the Redis password |
+| `redis.auth.password` | `""` | The Redis password itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. Use a long random value, such as `openssl rand -hex 32`. |
+| `superAgent.enabled` | `false` | Run changes approved in the dashboard. Needs the executor token and a Redis password. |
+| `superAgent.existingSecret` | `""` | Secret with the executor token from the dashboard. With `superAgent.enabled`, set this or `superAgent.executorToken`. |
+| `superAgent.existingSecretKey` | `EXECUTOR_TOKEN` | Key in that Secret that holds the executor token |
+| `superAgent.executorToken` | `""` | The executor token itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. |
 | `agent.nodeSelector` | `kubernetes.io/os: linux` | Nodes the agent can run on; AMD64 and ARM64 are selected automatically |
 | `superAgent.nodeSelector` | `kubernetes.io/os: linux` | Nodes the optional super-agent can run on |
 | `metrics.serviceMonitor.enabled` | `false` | Create a Prometheus Operator ServiceMonitor |

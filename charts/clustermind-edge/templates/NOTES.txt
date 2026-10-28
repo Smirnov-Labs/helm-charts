@@ -16,6 +16,8 @@ Scans use your workspace's Anthropic API key. Set it in the dashboard under Sett
 {{- if not .Values.superAgent.enabled }}
 
 The agent can read the cluster but not change it. To let it run changes you approve
-in the dashboard, run helm upgrade with your install flags plus
---set superAgent.enabled=true.
+in the dashboard, store the executor token and a Redis password in two Secrets, then
+set superAgent.enabled=true, superAgent.existingSecret and redis.auth.existingSecret.
+The commands are in "Let the agent make changes":
+https://github.com/Smirnov-Labs/helm-charts#let-the-agent-make-changes
 {{- end }}

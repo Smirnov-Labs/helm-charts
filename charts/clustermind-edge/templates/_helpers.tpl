@@ -145,6 +145,33 @@ CLUSTER_API_KEY; an existing Secret uses controlPlane.existingSecretKey.
 {{- end }}
 
 {{/*
+The executor token's Secret and key.
+
+Read the values added in 0.4.0 (superAgent.executorToken, superAgent.existingSecret,
+superAgent.existingSecretKey and redis.auth) with dig. An upgrade with --reuse-values uses
+the old release's values, which hold only the keys that release defined.
+*/}}
+{{- define "clustermind-edge.executorSecretName" -}}
+{{- dig "existingSecret" "" .Values.superAgent | default (printf "%s-super-agent-token" (include "clustermind-edge.fullname" .)) }}
+{{- end }}
+{{- define "clustermind-edge.executorSecretKey" -}}
+{{- if dig "existingSecret" "" .Values.superAgent }}{{ dig "existingSecretKey" "" .Values.superAgent | default "EXECUTOR_TOKEN" }}{{ else }}EXECUTOR_TOKEN{{ end }}
+{{- end }}
+
+{{/*
+Redis requires a password exactly when the super-agent runs.
+*/}}
+{{- define "clustermind-edge.redisAuth" -}}
+{{- if and .Values.redis.enabled .Values.superAgent.enabled }}true{{ end }}
+{{- end }}
+{{- define "clustermind-edge.redisSecretName" -}}
+{{- dig "auth" "existingSecret" "" .Values.redis | default (printf "%s-redis-auth" (include "clustermind-edge.fullname" .)) }}
+{{- end }}
+{{- define "clustermind-edge.redisSecretKey" -}}
+{{- if dig "auth" "existingSecret" "" .Values.redis }}{{ dig "auth" "existingSecretKey" "" .Values.redis | default "REDIS_PASSWORD" }}{{ else }}REDIS_PASSWORD{{ end }}
+{{- end }}
+
+{{/*
 Stop the install early, with a message, on mistakes the agent would otherwise only
 report by crash-looping.
 */}}
@@ -157,6 +184,20 @@ report by crash-looping.
 {{- end }}
 {{- if and (not .Values.controlPlane.url) (not (or .Values.slack.botToken .Values.slack.existingSecret)) }}
 {{- fail "Set controlPlane.url and its agent token, or the slack values for direct Slack mode." }}
+{{- end }}
+{{- if .Values.superAgent.enabled }}
+{{- if not (or (dig "executorToken" "" .Values.superAgent) (dig "existingSecret" "" .Values.superAgent)) }}
+{{- fail "superAgent.enabled needs the executor token from the dashboard (Clusters → Generate executor token): set superAgent.existingSecret, or superAgent.executorToken. The super-agent claims approved changes with it." }}
+{{- end }}
+{{- if not .Values.controlPlane.url }}
+{{- fail "superAgent.enabled needs controlPlane.url: the super-agent claims approvals from the control plane." }}
+{{- end }}
+{{- if not .Values.redis.enabled }}
+{{- fail "superAgent.enabled needs the chart's Redis: the super-agent connects to the Redis in the edge pod. Set redis.enabled=true, or leave superAgent.enabled off." }}
+{{- end }}
+{{- if not (or (dig "auth" "password" "" .Values.redis) (dig "auth" "existingSecret" "" .Values.redis)) }}
+{{- fail "superAgent.enabled needs a Redis password: set redis.auth.existingSecret (for example a Secret made with openssl rand -hex 32), or redis.auth.password." }}
+{{- end }}
 {{- end }}
 {{- /*
 With no storageClass set, the Redis volume binds only if the cluster has a default

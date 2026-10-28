@@ -60,18 +60,36 @@ redis:
     limits:
       cpu: 200m
       memory: 256Mi
-  # Redis holds approval and investigation state. Without persistence that state is
-  # lost whenever the pod restarts. Turn it off on a cluster with no default
-  # StorageClass, or set storageClass.
+  # Redis holds the agents' conversation and coordination state, such as Slack thread
+  # ownership and the verification handoff. Without persistence that state is lost whenever
+  # the pod restarts. Turn it off on a cluster with no default StorageClass, or set
+  # storageClass.
   persistence:
     enabled: true
     size: 1Gi
     storageClass: ""
+  # While the super-agent runs, Redis requires a password, because the super-agent connects
+  # to it from its own pod. Otherwise Redis listens on localhost, for the agent in its pod.
+  # Set existingSecret (an existing Secret in the release namespace) or password (the chart
+  # stores it in a Secret); existingSecret keeps it out of Helm's release history and works
+  # with Argo CD. Use a long random value for the password, such as the output of
+  # openssl rand -hex 32.
+  auth:
+    existingSecret: ""
+    existingSecretKey: "REDIS_PASSWORD"  # pragma: allowlist secret
+    password: ""
 
 # The privileged executor. It runs changes a person approved in the dashboard, with
 # broad write access to the cluster. While it is off, the agent can only read.
 superAgent:
   enabled: false
+  # The executor token from the dashboard (Clusters → Generate executor token). The
+  # super-agent claims approved changes with it, so it is required while enabled.
+  # existingSecret names a Secret in the release namespace that holds it; executorToken puts
+  # it in a Secret the chart creates.
+  executorToken: ""
+  existingSecret: ""
+  existingSecretKey: "EXECUTOR_TOKEN"  # pragma: allowlist secret
   resources:
     requests:
       cpu: 100m

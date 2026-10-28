@@ -2,3 +2,11 @@
 # agent token, so this names a Secret that only has to exist on a real cluster.
 controlPlane:
   existingSecret: clustermind-agent-token  # pragma: allowlist secret
+
+# The renders that turn the super-agent on use these Secret names. A real cluster needs the
+# Secrets themselves.
+superAgent:
+  existingSecret: clustermind-super-agent-token  # pragma: allowlist secret
+redis:
+  auth:
+    existingSecret: clustermind-redis-auth  # pragma: allowlist secret

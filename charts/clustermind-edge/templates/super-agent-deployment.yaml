@@ -22,9 +22,11 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
-        # Restart the pod when its config or the chart's Secret changes.
+        # Restart the pod when its config or the chart's Secrets change.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        checksum/executor-secret: {{ include (print $.Template.BasePath "/super-agent-secret.yaml") . | sha256sum }}
+        checksum/redis-secret: {{ include (print $.Template.BasePath "/redis-secret.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "clustermind-edge.superAgentServiceAccountName" . }}
       # SIGTERM starts the super-agent's graceful shutdown. That takes about 1s when
@@ -69,11 +71,21 @@ spec:
             # Refs: claude-k8s spec 2026-04-19 RC1, Phase 0.1.
             - name: DIAGNOSTIC_MODE
               value: {{ .Values.superAgent.diagnosticMode | default "readwrite" | quote }}
-            # The edge pod's Redis, through its Service. The agent there also
-            # publishes the Anthropic key it gets from the control plane, so the
-            # super-agent needs no key of its own, and no agent token.
+            # The edge pod's Redis, through its Service. The super-agent keeps its coordination
+            # state there (Slack thread ownership, the verification handoff). It claims
+            # approvals and gets its credentials from the control plane with the executor token.
             - name: REDIS_URL
               value: "redis://{{ include "clustermind-edge.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:6379/0"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clustermind-edge.redisSecretName" . }}
+                  key: {{ include "clustermind-edge.redisSecretKey" . }}
+            - name: EXECUTOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clustermind-edge.executorSecretName" . }}
+                  key: {{ include "clustermind-edge.executorSecretKey" . }}
             {{- if or .Values.anthropic.apiKey .Values.anthropic.existingSecret }}
             - name: ANTHROPIC_API_KEY
               valueFrom:
