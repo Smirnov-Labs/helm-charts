@@ -2,27 +2,36 @@
 # Copy this file and fill in your own values.
 # NEVER commit real API keys or customer-specific hostnames to this repo.
 #
-# First create the namespace and a Secret with the agent token from the dashboard:
+# First create the namespace and three Secrets: the agent token and the executor token from
+# the dashboard, and a Redis password:
 #   kubectl create namespace clustermind
 #   kubectl -n clustermind create secret generic clustermind-agent-token --save-config \
 #     --from-literal=CLUSTER_API_KEY=<agent token>
+#   kubectl -n clustermind create secret generic clustermind-super-agent-token --save-config \
+#     --from-literal=EXECUTOR_TOKEN=<executor token>
+#   kubectl -n clustermind create secret generic clustermind-redis-auth \
+#     --from-literal=REDIS_PASSWORD="$(openssl rand -hex 32)"
 #
 # Install:
 #   helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-#     --version 0.4.0 -f my-values.yaml --namespace clustermind
+#     --version 0.4.1 -f my-values.yaml --namespace clustermind
 
 controlPlane:
   existingSecret: clustermind-agent-token  # pragma: allowlist secret
 
 redis:
+  auth:
+    existingSecret: clustermind-redis-auth  # pragma: allowlist secret
   persistence:
     # Empty uses the cluster's default StorageClass. New EKS clusters have none, so
     # name one there, such as gp3.
     storageClass: ""
 
-# Off by default. Turn it on to let the agent run changes approved in the dashboard.
+# Runs the changes someone approves in ClusterMind. For an agent that changes nothing, set
+# enabled to false and skip the executor token and Redis Secrets.
 superAgent:
-  enabled: false
+  enabled: true
+  existingSecret: clustermind-super-agent-token  # pragma: allowlist secret
 
 metrics:
   serviceMonitor:
