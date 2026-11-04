@@ -200,7 +200,7 @@ Helm 3.8 evaluates every argument of and.
 {{- end }}
 {{- end }}
 {{- if not (or (dig "executorToken" "" .Values.superAgent) (dig "existingSecret" "" .Values.superAgent)) }}
-{{- fail "superAgent.enabled needs the executor token from the dashboard (Clusters, then Connection settings, then the key icon on the cluster's row): set superAgent.existingSecret, or superAgent.executorToken. The super-agent claims approved changes with it." }}
+{{- fail "superAgent.enabled needs the executor token from the dashboard (Settings, then Cluster connections, then Manage on the cluster's row, then the Approved changes section): set superAgent.existingSecret, or superAgent.executorToken. The super-agent claims approved changes with it." }}
 {{- end }}
 {{- if not .Values.controlPlane.url }}
 {{- fail "superAgent.enabled needs controlPlane.url: the super-agent claims approvals from the control plane." }}

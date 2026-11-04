@@ -85,10 +85,10 @@ redis:
 # edge v1.10.0 or later: leave image.tag empty, or set it to v1.10.0 or later.
 superAgent:
   enabled: false
-  # The executor token from the dashboard (Clusters, then Connection settings, then the key
-  # icon on the cluster's row). The super-agent claims approved changes with it, so it is
-  # required while enabled. existingSecret names a Secret in the release namespace that holds
-  # it; executorToken puts it in a Secret the chart creates.
+  # The executor token from the dashboard (Settings, then Cluster connections, then Manage on
+  # the cluster's row, then the Approved changes section). The super-agent claims approved
+  # changes with it, so it is required while enabled. existingSecret names a Secret in the
+  # release namespace that holds it; executorToken puts it in a Secret the chart creates.
   executorToken: ""
   existingSecret: ""
   existingSecretKey: "EXECUTOR_TOKEN"  # pragma: allowlist secret
