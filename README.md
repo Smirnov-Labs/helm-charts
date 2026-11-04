@@ -122,7 +122,7 @@ helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge
   --set redis.auth.existingSecret=clustermind-redis-auth
 ```
 
-Generate the executor token in the dashboard: open Clusters, then Connection settings, and click the key icon on the cluster's row. `--reset-then-reuse-values` needs Helm 3.14 or later. It keeps the values you installed with and adds the new chart's defaults.
+Generate the executor token in the dashboard. Open Settings, then Cluster connections, and click Manage on the cluster's row. In the Approved changes section, click Generate executor token. `--reset-then-reuse-values` needs Helm 3.14 or later. It keeps the values you installed with and adds the new chart's defaults.
 
 [rbac-readwrite.yaml](charts/clustermind-edge/templates/rbac-readwrite.yaml) lists everything it can do.
 
