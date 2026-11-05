@@ -16,7 +16,7 @@ You need:
 - A default StorageClass, for the agent's 1Gi Redis volume. New EKS clusters have none; see [Storage](#storage).
 - Helm 3.8 or later.
 
-1. In the [dashboard](https://app.clustermind.ai), add the cluster under **Clusters** and copy its agent token. Then open **Connection settings**, click the key icon on the cluster's row, and copy its executor token. The dashboard shows each token once.
+1. In the [dashboard](https://app.clustermind.ai), add the cluster under **Clusters**, with **Let ClusterMind make changes you approve** left on. The dashboard then shows the cluster's agent token and its executor token, each once. For a cluster added without them, open **Settings**, then **Cluster connections**, choose the cluster, and generate an executor token in its **Settings** tab.
 2. Create the namespace, and store both tokens and a Redis password in it:
 
    ```bash
@@ -135,7 +135,7 @@ helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge
   --set redis.auth.existingSecret=clustermind-redis-auth
 ```
 
-Generate the executor token in the dashboard: open Clusters, then Connection settings, and click the key icon on the cluster's row. The dashboard shows these same commands with the token filled in. `--reset-then-reuse-values` needs Helm 3.14 or later. It keeps the values you installed with and adds the new chart's defaults.
+Generate the executor token in the dashboard: open Settings, then Cluster connections, choose the cluster, and generate it in its Settings tab. The dashboard shows these same commands with the token filled in. `--reset-then-reuse-values` needs Helm 3.14 or later. It keeps the values you installed with and adds the new chart's defaults.
 
 [rbac-readwrite.yaml](charts/clustermind-edge/templates/rbac-readwrite.yaml) lists everything the super-agent can do.
 
