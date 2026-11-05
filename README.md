@@ -16,38 +16,48 @@ You need:
 - A default StorageClass, for the agent's 1Gi Redis volume. New EKS clusters have none; see [Storage](#storage).
 - Helm 3.8 or later.
 
-1. In the [dashboard](https://app.clustermind.ai), add the cluster under **Clusters** and copy its agent token. The dashboard shows it once.
-2. Create the namespace and store the token in it:
+1. In the [dashboard](https://app.clustermind.ai), add the cluster under **Clusters**, with **Let ClusterMind make changes you approve** left on. The dashboard then shows the cluster's agent token and its executor token, each once. For a cluster added without them, open **Settings**, then **Cluster connections**, choose the cluster, and generate an executor token in its **Settings** tab.
+2. Create the namespace, and store both tokens and a Redis password in it:
 
    ```bash
    kubectl create namespace clustermind
    kubectl -n clustermind create secret generic clustermind-agent-token --save-config \
      --from-literal=CLUSTER_API_KEY=<agent token>
+   kubectl -n clustermind create secret generic clustermind-super-agent-token --save-config \
+     --from-literal=EXECUTOR_TOKEN=<executor token>
+   kubectl -n clustermind create secret generic clustermind-redis-auth \
+     --from-literal=REDIS_PASSWORD="$(openssl rand -hex 32)"
    ```
 
-   `--save-config` lets you update the Secret later with `kubectl apply`.
+   `--save-config` lets you update a token Secret later with `kubectl apply`.
 
 3. Install the chart:
 
    ```bash
    helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-     --version 0.4.0 \
+     --version 0.4.1 \
      --namespace clustermind \
-     --set controlPlane.existingSecret=clustermind-agent-token
+     --set controlPlane.existingSecret=clustermind-agent-token \
+     --set superAgent.enabled=true \
+     --set superAgent.existingSecret=clustermind-super-agent-token \
+     --set redis.auth.existingSecret=clustermind-redis-auth
    ```
 
 Within a minute or two the cluster shows as connected in the dashboard. Scans use your workspace's Anthropic API key, which you set in the dashboard under **Settings**. The agent gets that key and its Slack access from ClusterMind. The chart takes no Anthropic or Slack credentials.
 
-To check on the agent:
+The agent reads the cluster and cannot read Secrets. The super-agent runs the changes someone approves in ClusterMind, such as restarting a deployment or cordoning a node. It has broad write access, Secrets included; [rbac-readwrite.yaml](charts/clustermind-edge/templates/rbac-readwrite.yaml) lists everything it can do. For an agent that changes nothing, leave out the executor token and Redis Secrets and the last three `--set` lines. You can [turn approved changes on](#turn-on-approved-changes) later.
+
+To check on the agents:
 
 ```bash
 kubectl -n clustermind get pods
 kubectl -n clustermind logs statefulset/clustermind-edge -c agent
+kubectl -n clustermind logs deployment/clustermind-edge-super-agent
 ```
 
-If the log shows `websocket_connection_failed` with `"reason": "unauthorized"`, the Secret doesn't hold the cluster's current token.
+If the agent's log shows `websocket_connection_failed` with `"reason": "unauthorized"`, the Secret doesn't hold the cluster's current token.
 
-The chart won't install into the `default` namespace, or without a token.
+The chart won't install into the `default` namespace, or without a token. With `superAgent.enabled`, it also won't install without the executor token and the Redis password.
 
 ### Node architectures
 
@@ -56,7 +66,7 @@ same installation command. Both agents select Linux nodes without an architectur
 restriction. Kubernetes pulls the matching variant of the multi-platform image
 for whichever node runs the pod. Redis also supports both architectures.
 
-The default edge image is release `v1.10.0`. CI built it on native AMD64 and ARM64
+The default edge image is release `v1.10.1`. CI built it on native AMD64 and ARM64
 runners and ran the runtime and bundled-tool checks on each before publishing it.
 Chart installs pin that tag, so they do not follow the mutable `latest` tag.
 
@@ -71,9 +81,14 @@ settings, for example:
 
 ```bash
 helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-  --version 0.4.0 --namespace clustermind --reset-values \
-  --set controlPlane.existingSecret=clustermind-agent-token
+  --version 0.4.1 --namespace clustermind --reset-values \
+  --set controlPlane.existingSecret=clustermind-agent-token \
+  --set superAgent.enabled=true \
+  --set superAgent.existingSecret=clustermind-super-agent-token \
+  --set redis.auth.existingSecret=clustermind-redis-auth
 ```
+
+Leave out the last three `--set` lines if the release runs without the super-agent.
 
 ### Storage
 
@@ -102,11 +117,9 @@ kubectl -n clustermind create secret generic clustermind-agent-token \
 kubectl -n clustermind rollout restart statefulset/clustermind-edge
 ```
 
-### Let the agent make changes
+### Turn on approved changes
 
-By default the agent can read the cluster and change nothing. It cannot read Secrets.
-
-The super-agent runs changes that someone approved in the dashboard, such as restarting a deployment or cordoning a node. It has broad write access, Secrets included, so it is off by default. To turn it on:
+An agent installed without the super-agent can read the cluster and change nothing, even when someone approves a change. To add the super-agent to an existing release:
 
 ```bash
 kubectl -n clustermind create secret generic clustermind-super-agent-token \
@@ -122,9 +135,9 @@ helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge
   --set redis.auth.existingSecret=clustermind-redis-auth
 ```
 
-Generate the executor token in the dashboard: open Clusters, then Connection settings, and click the key icon on the cluster's row. `--reset-then-reuse-values` needs Helm 3.14 or later. It keeps the values you installed with and adds the new chart's defaults.
+Generate the executor token in the dashboard: open Settings, then Cluster connections, choose the cluster, and generate it in its Settings tab. The dashboard shows these same commands with the token filled in. `--reset-then-reuse-values` needs Helm 3.14 or later. It keeps the values you installed with and adds the new chart's defaults.
 
-[rbac-readwrite.yaml](charts/clustermind-edge/templates/rbac-readwrite.yaml) lists everything it can do.
+[rbac-readwrite.yaml](charts/clustermind-edge/templates/rbac-readwrite.yaml) lists everything the super-agent can do.
 
 ### Rotate the executor token and the Redis password
 
@@ -191,7 +204,7 @@ Run `helm upgrade` with the flags you installed with. Each chart version deploys
 
 **Upgrading to 0.4.0:**
 
-With `superAgent.enabled`, the chart needs the executor token from the dashboard, a Redis password of at least 16 characters, and edge v1.10.0 or later. Create both Secrets and set `superAgent.existingSecret` and `redis.auth.existingSecret`, as in "Let the agent make changes". Upgrade with `--reset-then-reuse-values`, which adds 0.4.0's new defaults to the values you installed with; `--reuse-values` takes the installed values alone.
+With `superAgent.enabled`, the chart needs the executor token from the dashboard, a Redis password of at least 16 characters, and edge v1.10.0 or later. Create both Secrets and set `superAgent.existingSecret` and `redis.auth.existingSecret`, as in "Turn on approved changes". Upgrade with `--reset-then-reuse-values`, which adds 0.4.0's new defaults to the values you installed with; `--reuse-values` takes the installed values alone.
 
 If you set `image.tag` to an earlier release, add `--set image.tag=` to the `helm upgrade` to remove it, or set it to `v1.10.0` or later. `--reset-then-reuse-values` keeps the value you installed with, and the chart stops the upgrade on an earlier release.
 
@@ -226,7 +239,7 @@ Every value is in [values.yaml](charts/clustermind-edge/values.yaml). The ones y
 | `redis.auth.existingSecret` | `""` | Secret with the Redis password, at least 16 characters. With `superAgent.enabled`, set this or `redis.auth.password`. |
 | `redis.auth.existingSecretKey` | `REDIS_PASSWORD` | Key in that Secret that holds the Redis password |
 | `redis.auth.password` | `""` | The Redis password itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. At least 16 characters; Redis does not start with a shorter one. Use a long random value, such as `openssl rand -hex 32`. |
-| `superAgent.enabled` | `false` | Run changes approved in the dashboard. Needs the executor token, a Redis password and edge v1.10.0 or later. |
+| `superAgent.enabled` | `false` | Run changes approved in the dashboard. The install above turns it on. Needs the executor token, a Redis password and edge v1.10.0 or later. |
 | `superAgent.existingSecret` | `""` | Secret with the executor token from the dashboard. With `superAgent.enabled`, set this or `superAgent.executorToken`. |
 | `superAgent.existingSecretKey` | `EXECUTOR_TOKEN` | Key in that Secret that holds the executor token |
 | `superAgent.executorToken` | `""` | The executor token itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. |
