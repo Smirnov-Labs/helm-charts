@@ -184,7 +184,7 @@ jobs:
             fi
           }
           values="$CHART/ci/test-values.yaml"
-          needs_token="superAgent.enabled needs the executor token from the dashboard (Clusters, then Connection settings, then the key icon"
+          needs_token="superAgent.enabled needs the executor token from the dashboard (Settings, then Cluster connections, then the cluster's Settings tab)"
           needs_password="superAgent.enabled needs a Redis password"
           from_033=(--set redis.auth=null --set superAgent.executorToken=null
                     --set superAgent.existingSecret=null --set superAgent.existingSecretKey=null)
