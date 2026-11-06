@@ -4,256 +4,136 @@ on:
   push:
     tags:
       - 'v*'
-  # Lint and render only; nothing is published from a pull request.
+  # Tests only; nothing is published from a pull request.
   pull_request:
+  # Tests the chosen ref, and publishes only when that ref is a v* tag.
   workflow_dispatch:
-    inputs:
-      chart:
-        description: 'Chart to publish (e.g., clustermind-edge)'
-        required: true
-        default: 'clustermind-edge'
+
+permissions:
+  contents: read
 
 env:
   REGISTRY: ghcr.io/smirnov-labs/charts
+  CHART: charts/clustermind-edge
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
+      # The oldest Helm the README supports, and the current release.
+      - name: Set up Helm 3.8
+        id: helm3
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.8.2
 
-      - name: Login to GHCR
-        if: github.event_name != 'pull_request'
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Set up Helm 4
+        id: helm4
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
 
-      - name: Determine chart to publish
-        id: chart
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "name=${{ github.event.inputs.chart }}" >> $GITHUB_OUTPUT
-          else
-            echo "name=clustermind-edge" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Lint chart
-        run: |
-          CHART="charts/${{ steps.chart.outputs.name }}"
-          echo "Linting $CHART..."
-          helm lint --strict "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml"
-
-      # helm lint doesn't evaluate the chart's fail checks, so render it too: with the
-      # CI values, with every optional part on, and once each where it must refuse.
       - name: Install render assertion dependency
         run: python3 -m pip install PyYAML==6.0.3
 
-      - name: Render chart
-        run: |  # pragma: allowlist secret
-          CHART="charts/${{ steps.chart.outputs.name }}"
-          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" > /dev/null
-          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
-            --set superAgent.enabled=true \
-            --set metrics.serviceMonitor.enabled=true \
-            --set metrics.prometheusRule.enabled=true \
-            --set redis.persistence.enabled=false \
-            --set diagnostics.localFallback.enabled=true > /dev/null
-          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
-            -f "$CHART/ci/arm64-values.yaml" > /tmp/arm64-chart.yaml
-          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
-            --set superAgent.enabled=true > /tmp/default-chart.yaml
-          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" \
-            --set superAgent.enabled=true \
-            --set 'agent.nodeSelector.kubernetes\.io/arch=amd64' \
-            --set 'superAgent.nodeSelector.kubernetes\.io/arch=amd64' > /tmp/amd64-chart.yaml
-          python3 - <<'PYTHON'
-          import yaml
-          chart = yaml.safe_load(open('charts/clustermind-edge/Chart.yaml'))
-          expected_image = 'ghcr.io/smirnov-labs/clustermind-edge:' + chart['appVersion']
-          for name, architecture in [('default', None), ('amd64', 'amd64'), ('arm64', 'arm64')]:
-              workloads = [doc for doc in yaml.safe_load_all(open('/tmp/' + name + '-chart.yaml'))
-                           if doc and doc.get('kind') in ('StatefulSet', 'Deployment')]
-              assert len(workloads) == 2, (name, workloads)
-              for workload in workloads:
-                  pod = workload['spec']['template']['spec']
-                  selector = pod['nodeSelector']
-                  assert selector.get('kubernetes.io/arch') == architecture, (name, selector)
-                  assert selector['kubernetes.io/os'] == 'linux', (name, selector)
-                  assert any(c['image'] == expected_image for c in pod['containers']), (name, pod)
-          PYTHON
-          if helm template clustermind-edge "$CHART" -f "$CHART/ci/test-values.yaml" > /dev/null 2>&1; then
-            echo "::error::the chart rendered into the default namespace; it must refuse"
-            exit 1
-          fi
-          if helm template clustermind-edge "$CHART" --namespace clustermind > /dev/null 2>&1; then
-            echo "::error::the chart rendered without an agent token; it must refuse"
-            exit 1
-          fi
-          # With the super-agent off, Redis listens on localhost and the Service lists the http
-          # and metrics ports. With it on, Redis requires a password, the Service adds the Redis
-          # port, and the super-agent has its own executor token.
-          helm template clustermind-edge "$CHART" --namespace clustermind -f "$CHART/ci/test-values.yaml" > /tmp/no-super-agent.yaml
-          python3 - <<'PYTHON'
-          import os
-          import subprocess
-          import tempfile
-          import yaml
-          def docs(path):
-              return [d for d in yaml.safe_load_all(open(path)) if d]
-          def redis_cmd(ds):
-              sts = next(d for d in ds if d['kind'] == 'StatefulSet')
-              return next(c for c in sts['spec']['template']['spec']['initContainers'] if c['name'] == 'redis')['command']
-          def edge_service_ports(ds):
-              svc = next(d for d in ds if d['kind'] == 'Service' and not d['metadata']['name'].endswith('super-agent'))
-              return [p['port'] for p in svc['spec']['ports']]
-          plain, full = docs('/tmp/no-super-agent.yaml'), docs('/tmp/default-chart.yaml')
-          assert '--bind' in redis_cmd(plain) and '127.0.0.1' in redis_cmd(plain), redis_cmd(plain)
-          assert '--requirepass' not in redis_cmd(plain), redis_cmd(plain)
-          assert 6379 not in edge_service_ports(plain), edge_service_ports(plain)
-          assert '--requirepass' in redis_cmd(full) and '$(REDIS_PASSWORD)' in redis_cmd(full), redis_cmd(full)
-          assert 6379 in edge_service_ports(full)
-          deployment = next(d for d in full if d['kind'] == 'Deployment')
-          env = {e['name']: e for e in deployment['spec']['template']['spec']['containers'][0]['env']}
-          assert env['EXECUTOR_TOKEN']['valueFrom']['secretKeyRef'] == {'name': 'clustermind-super-agent-token', 'key': 'EXECUTOR_TOKEN'}, env['EXECUTOR_TOKEN']
-          assert env['REDIS_PASSWORD']['valueFrom']['secretKeyRef']['name'] == 'clustermind-redis-auth'
-          pod = next(d for d in full if d['kind'] == 'StatefulSet')['spec']['template']['spec']
-          sidecar = next(c for c in pod['initContainers'] if c['name'] == 'redis')
-          agent = next(c for c in pod['containers'] if c['name'] == 'agent')
-          assert {'REDIS_PASSWORD', 'REDISCLI_AUTH'} <= {e['name'] for e in sidecar['env']}, sidecar['env']
-          assert 'REDIS_PASSWORD' in {e['name'] for e in agent['env']}, agent['env']
-          for workload in (d for d in full if d['kind'] in ('StatefulSet', 'Deployment')):
-              spec = workload['spec']['template']['spec']
-              for container in spec.get('initContainers', []) + spec['containers']:
-                  for e in container.get('env', []):
-                      assert e['name'] != 'REDIS_URL' or '@' not in e.get('value', ''), 'REDIS_URL of ' + container['name'] + ' contains @'
-          # While the super-agent runs, Redis starts only with a password of 16 or more
-          # characters. The command is checked as rendered, then run with a stand-in redis-server.
-          auth_cmd = redis_cmd(full)
-          assert auth_cmd[:2] == ['sh', '-c'] and auth_cmd[3] == 'redis-server', auth_cmd
-          assert '${#REDIS_PASSWORD}' in auth_cmd[2] and '-lt 16' in auth_cmd[2] and 'exec redis-server "$@"' in auth_cmd[2], auth_cmd[2]
-          assert redis_cmd(plain)[0] == 'redis-server' and not any('REDIS_PASSWORD' in word for word in redis_cmd(plain)), redis_cmd(plain)
-          stub_dir = tempfile.mkdtemp()
-          stub_out = os.path.join(stub_dir, 'argv')
-          with open(os.path.join(stub_dir, 'redis-server'), 'w') as stub:
-              stub.write('#!/bin/sh\nprintf "%s\\n" "$@" > "$STUB_OUT"\n')
-          os.chmod(os.path.join(stub_dir, 'redis-server'), 0o755)
-          def start_redis(password):
-              # The kubelet expands $(REDIS_PASSWORD) before it starts the container.
-              argv = [word.replace('$(REDIS_PASSWORD)', password) for word in auth_cmd]
-              env = dict(os.environ, PATH=stub_dir + os.pathsep + os.environ['PATH'], REDIS_PASSWORD=password, STUB_OUT=stub_out)
-              if os.path.exists(stub_out):
-                  os.remove(stub_out)
-              result = subprocess.run(argv, env=env, capture_output=True, text=True)
-              return result, os.path.exists(stub_out)
-          for password in ('', 'x', 'x' * 15):
-              result, started = start_redis(password)
-              assert result.returncode != 0 and not started and 'at least 16 characters' in result.stderr, ('a password of ' + str(len(password)) + ' characters must stop Redis', result)
-          result, started = start_redis('x' * 16)
-          assert result.returncode == 0 and started, ('a password of 16 characters must start Redis', result)
-          started_with = open(stub_out).read().splitlines()
-          assert started_with[started_with.index('--requirepass') + 1] == 'x' * 16 and '--appendonly' in started_with, started_with
-          PYTHON
-          # Each case below must be refused with the chart's own message. An upgrade with
-          # --reuse-values uses the values of the old release, which hold only the keys that
-          # release defined; the from_033 flags give the merged values that shape.
-          refuse() {
-            expected="$1"
-            shift
-            if output=$(helm template clustermind-edge "$CHART" --namespace clustermind "$@" 2>&1); then
-              echo "::error::the chart rendered with: $*; it must refuse"
-              exit 1
-            fi
-            if [[ "$output" != *"$expected"* ]]; then
-              echo "::error::the chart refused with: $*; the error lacks: $expected"
-              echo "$output"
-              exit 1
-            fi
-          }
-          renders() {
-            if ! output=$(helm template clustermind-edge "$CHART" --namespace clustermind "$@" 2>&1); then
-              echo "::error::the chart refused: $*; it must render"
-              echo "$output"
-              exit 1
-            fi
-          }
-          values="$CHART/ci/test-values.yaml"
-          needs_token="superAgent.enabled needs the executor token from the dashboard (Settings, then Cluster connections, then the cluster's Settings tab)"
-          needs_password="superAgent.enabled needs a Redis password"
-          from_033=(--set redis.auth=null --set superAgent.executorToken=null
-                    --set superAgent.existingSecret=null --set superAgent.existingSecretKey=null)
-          # The values of an upgrade from 0.3.3 render while the super-agent is off.
-          renders -f "$values" "${from_033[@]}"
-          refuse "$needs_token" -f "$values" --set superAgent.enabled=true --set superAgent.existingSecret=
-          refuse "$needs_password" -f "$values" --set superAgent.enabled=true --set redis.auth.existingSecret=
-          refuse "superAgent.enabled needs the chart's Redis" -f "$values" --set superAgent.enabled=true --set redis.enabled=false
-          refuse "superAgent.enabled needs controlPlane.url" -f "$values" --set superAgent.enabled=true --set controlPlane.url= --set slack.existingSecret=clustermind-slack
-          refuse "$needs_token" -f "$values" "${from_033[@]}" --set superAgent.enabled=true
-          refuse "$needs_password" -f "$values" "${from_033[@]}" --set superAgent.enabled=true --set superAgent.existingSecret=clustermind-super-agent-token
-          # The super-agent needs edge v1.10.0 or later. An image.tag that starts with an earlier
-          # version is refused, with or without the v and a suffix. v1.10.0 and later render, and
-          # so do an empty tag and a tag that is no version. With the super-agent off, any tag renders.
-          needs_edge="superAgent.enabled needs edge v1.10.0 or later"
-          for tag in v1.9.7 1.9.7 v1.9.7-rc.1; do
-            refuse "$needs_edge" -f "$values" --set superAgent.enabled=true --set "image.tag=$tag"
-          done
-          # The message says how to get past it, and that works: a later --set image.tag= replaces
-          # the earlier tag, including one that --reset-then-reuse-values brings back.
-          refuse "Add --set image.tag= to the helm command, or set image.tag to v1.10.0 or later." -f "$values" --set superAgent.enabled=true --set image.tag=v1.9.7
-          renders -f "$values" --set superAgent.enabled=true --set image.tag=v1.9.7 --set image.tag=
-          for tag in v1.10.0 1.10.0 v1.10.0-rc.1 v1.11.0 latest sha256-abc123 ""; do
-            renders -f "$values" --set superAgent.enabled=true --set "image.tag=$tag"
-          done
-          renders -f "$values" --set image.tag=v1.9.7
+      - name: Check chart with Helm 3.8
+        env:
+          HELM: ${{ steps.helm3.outputs.helm-path }}
+        run: tests/clustermind-edge.sh
 
-      - name: Verify default image supports AMD64 and ARM64
+      - name: Check chart with Helm 4
+        env:
+          HELM: ${{ steps.helm4.outputs.helm-path }}
+        run: tests/clustermind-edge.sh
+
+      - name: Verify default images support AMD64 and ARM64
         run: |
           python3 - <<'PYTHON'
           import json
+          import os
           import subprocess
           import yaml
           from pathlib import Path
-          chart = Path('charts/clustermind-edge')
+          chart = Path(os.environ['CHART'])
           metadata = yaml.safe_load((chart / 'Chart.yaml').read_text())
           values = yaml.safe_load((chart / 'values.yaml').read_text())
-          image = (values['global']['imageRegistry'] + '/' + values['image']['repository']
-                   + ':' + (values['image']['tag'] or metadata['appVersion']))
-          index = json.loads(subprocess.check_output(
-              ['docker', 'buildx', 'imagetools', 'inspect', image, '--raw'], text=True))
-          platforms = {(m.get('platform', {}).get('os'), m.get('platform', {}).get('architecture'))
-                       for m in index.get('manifests', [])}
-          assert {('linux', 'amd64'), ('linux', 'arm64')} <= platforms, (image, platforms)
-          print(image + ' supports linux/amd64 and linux/arm64')
+          edge = (values['global']['imageRegistry'] + '/' + values['image']['repository']
+                  + ':' + (values['image']['tag'] or metadata['appVersion']))
+          for image in (edge, values['redis']['image']):
+              index = json.loads(subprocess.check_output(
+                  ['docker', 'buildx', 'imagetools', 'inspect', image, '--raw'], text=True))
+              platforms = {(m.get('platform', {}).get('os'), m.get('platform', {}).get('architecture'))
+                           for m in index.get('manifests', [])}
+              assert {('linux', 'amd64'), ('linux', 'arm64')} <= platforms, (image, platforms)
+              print(image + ' supports linux/amd64 and linux/arm64')
           PYTHON
 
-      - name: Package chart
-        if: github.event_name != 'pull_request'
-        id: package
-        run: |
-          CHART="charts/${{ steps.chart.outputs.name }}"
+  publish:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # Runs for the same tag take turns, so a second run sees what the first published.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-          # A tag sets the chart version only. appVersion stays as Chart.yaml has it: it
-          # is the edge image tag the chart deploys, which the chart version is not.
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-            echo "Setting chart version to $VERSION"
-            sed -i "s/^version:.*/version: $VERSION/" "$CHART/Chart.yaml"
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+
+      # The tag names the version Chart.yaml already holds; nothing rewrites Chart.yaml.
+      # appVersion is the edge image tag the chart deploys, which the chart version is not.
+      - name: Check the tag matches Chart.yaml
+        id: version
+        run: |
+          VERSION=$(helm show chart "$CHART" | sed -n 's/^version: //p')
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $VERSION in $CHART/Chart.yaml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      # GHCR lets a push replace a version, and installs that pinned it would then get
+      # other content. Push only when the registry answers that the version is not
+      # there; any other lookup error stops the job. To publish a version again, delete
+      # it in GHCR first.
+      - name: Refuse to replace a published version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if output=$(helm show chart "oci://$REGISTRY/clustermind-edge" --version "$VERSION" 2>&1); then
+            echo "::error::clustermind-edge $VERSION is already published to oci://$REGISTRY; bump version in Chart.yaml and tag that"
+            exit 1
+          fi
+          if [[ "$output" != *": not found"* ]]; then
+            echo "::error::could not check whether oci://$REGISTRY/clustermind-edge:$VERSION exists"
+            echo "$output"
+            exit 1
           fi
 
-          helm package "$CHART"
-          PKG=$(ls *.tgz)
-          echo "package=$PKG" >> $GITHUB_OUTPUT
-          echo "Packaged: $PKG"
-
-      - name: Push chart to GHCR
-        if: github.event_name != 'pull_request'
+      - name: Package and push chart
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          echo "Publishing ${{ steps.package.outputs.package }} to oci://$REGISTRY..."
-          helm push "${{ steps.package.outputs.package }}" "oci://$REGISTRY"
-          echo "Published to oci://$REGISTRY/${{ steps.chart.outputs.name }}"
+          helm package "$CHART"
+          helm push "clustermind-edge-$VERSION.tgz" "oci://$REGISTRY"
+          echo "Published oci://$REGISTRY/clustermind-edge:$VERSION"

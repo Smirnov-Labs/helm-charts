@@ -9,3 +9,13 @@ repos:
     hooks:
       - id: detect-secrets
         args: ['--baseline', '.secrets.baseline']
+
+  # The chart checks CI runs. They need Helm and python3 with PyYAML.
+  - repo: local
+    hooks:
+      - id: clustermind-edge-chart
+        name: clustermind-edge chart checks
+        entry: tests/clustermind-edge.sh
+        language: system
+        files: ^(charts/clustermind-edge/|tests/clustermind-edge\.sh$)
+        pass_filenames: false
