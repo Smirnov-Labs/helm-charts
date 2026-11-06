@@ -53,7 +53,8 @@ agent:
 redis:
   enabled: true
   # While the super-agent runs, the container starts Redis through sh, so the image needs one.
-  image: redis:7-alpine
+  # Pinned so every install of a chart version runs the same Redis.
+  image: redis:7.4.12-alpine
   resources:
     requests:
       cpu: 50m

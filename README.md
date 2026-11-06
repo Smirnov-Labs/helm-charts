@@ -35,7 +35,7 @@ You need:
 
    ```bash
    helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-     --version 0.4.1 \
+     --version 0.4.2 \
      --namespace clustermind \
      --set controlPlane.existingSecret=clustermind-agent-token \
      --set superAgent.enabled=true \
@@ -81,7 +81,7 @@ settings, for example:
 
 ```bash
 helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-  --version 0.4.1 --namespace clustermind --reset-values \
+  --version 0.4.2 --namespace clustermind --reset-values \
   --set controlPlane.existingSecret=clustermind-agent-token \
   --set superAgent.enabled=true \
   --set superAgent.existingSecret=clustermind-super-agent-token \
@@ -245,8 +245,12 @@ Every value is in [values.yaml](charts/clustermind-edge/values.yaml). The ones y
 | `superAgent.executorToken` | `""` | The executor token itself, if you'd rather the chart create the Secret. It then also sits in Helm's release history. |
 | `agent.nodeSelector` | `kubernetes.io/os: linux` | Nodes the agent can run on; AMD64 and ARM64 are selected automatically |
 | `superAgent.nodeSelector` | `kubernetes.io/os: linux` | Nodes the optional super-agent can run on |
-| `metrics.serviceMonitor.enabled` | `false` | Create a Prometheus Operator ServiceMonitor |
+| `metrics.serviceMonitor.enabled` | `false` | Create Prometheus Operator ServiceMonitors for the agent and, when it runs, the super-agent |
 | `metrics.prometheusRule.enabled` | `false` | Create alert rules, including one for a rejected agent token |
+
+## Development
+
+`tests/clustermind-edge.sh` lints the chart, renders it and checks the output. It needs Helm and Python 3 with PyYAML, and the pre-commit hooks run it when the chart changes. CI runs it with Helm 3.8 and Helm 4. A chart is published only from a `v*` tag that matches the version in Chart.yaml, and a published version is never replaced.
 
 ## License
 

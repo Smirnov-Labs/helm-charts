@@ -19,4 +19,29 @@ spec:
       path: /metrics
       interval: {{ .Values.metrics.serviceMonitor.interval | default "30s" }}
       scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout | default "10s" }}
+{{- if .Values.superAgent.enabled }}
+---
+# The super-agent's Service has labels of its own, so it gets a ServiceMonitor of its own.
+# Its control-plane gauges stay 0 by design, and clustermindai_control_plane_configured
+# keeps the control-plane alerts from firing on them.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "clustermind-edge.fullname" . }}-super-agent
+  namespace: {{ .Values.metrics.serviceMonitor.namespace | default "monitoring" }}
+  labels:
+    {{- include "clustermind-edge.superAgentLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "clustermind-edge.superAgentSelectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval | default "30s" }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout | default "10s" }}
+{{- end }}
 {{- end }}

@@ -32,11 +32,14 @@ spec:
       # SIGTERM starts the super-agent's graceful shutdown. That takes about 1s when
       # idle and up to about 45s when an approved change is in flight.
       terminationGracePeriodSeconds: 60
+      # Pod Security "restricted" requires the seccomp profile.
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # The workflow pins each action to a commit. Dependabot proposes new releases and
+  # updates the version comment next to each pin.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
