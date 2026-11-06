@@ -77,6 +77,10 @@ jobs:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # Runs for the same tag take turns, so a second run sees what the first published.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -109,13 +113,20 @@ jobs:
         run: echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       # GHCR lets a push replace a version, and installs that pinned it would then get
-      # other content. To publish a version again, delete it in GHCR first.
+      # other content. Push only when the registry answers that the version is not
+      # there; any other lookup error stops the job. To publish a version again, delete
+      # it in GHCR first.
       - name: Refuse to replace a published version
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if helm show chart "oci://$REGISTRY/clustermind-edge" --version "$VERSION" > /dev/null 2>&1; then
+          if output=$(helm show chart "oci://$REGISTRY/clustermind-edge" --version "$VERSION" 2>&1); then
             echo "::error::clustermind-edge $VERSION is already published to oci://$REGISTRY; bump version in Chart.yaml and tag that"
+            exit 1
+          fi
+          if [[ "$output" != *": not found"* ]]; then
+            echo "::error::could not check whether oci://$REGISTRY/clustermind-edge:$VERSION exists"
+            echo "$output"
             exit 1
           fi
 
