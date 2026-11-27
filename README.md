@@ -35,7 +35,7 @@ You need:
 
    ```bash
    helm install clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-     --version 0.4.2 \
+     --version 0.4.3 \
      --namespace clustermind \
      --set controlPlane.existingSecret=clustermind-agent-token \
      --set superAgent.enabled=true \
@@ -81,7 +81,7 @@ settings, for example:
 
 ```bash
 helm upgrade clustermind-edge oci://ghcr.io/smirnov-labs/charts/clustermind-edge \
-  --version 0.4.2 --namespace clustermind --reset-values \
+  --version 0.4.3 --namespace clustermind --reset-values \
   --set controlPlane.existingSecret=clustermind-agent-token \
   --set superAgent.enabled=true \
   --set superAgent.existingSecret=clustermind-super-agent-token \
