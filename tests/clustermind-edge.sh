@@ -178,7 +178,7 @@ PYTHON
 # An upgrade with --reuse-values uses the values of the old release, which hold only
 # the keys that release defined; the from_033 flags give the merged values that shape.
 values="$CHART/ci/test-values.yaml"
-needs_token="superAgent.enabled needs the executor token from the dashboard (Settings, then Cluster connections, then the cluster's Settings tab)"
+needs_token="superAgent.enabled needs the executor token from the dashboard (Settings, then Cluster connections, then Manage on the cluster's row, then the Approved changes section)"
 needs_password="superAgent.enabled needs a Redis password"  # pragma: allowlist secret
 from_033=(--set redis.auth=null --set superAgent.executorToken=null
           --set superAgent.existingSecret=null --set superAgent.existingSecretKey=null)
